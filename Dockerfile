@@ -10,6 +10,7 @@ RUN --mount=type=cache,target=/root/.cache/yarn \
     npm_config_target_arch=${TARGETARCH} yarn --network-timeout 600000
 
 ARG NODE_ENV=production
+ARG VITE_APP_WS_SERVER_URL=https://draw-room.comfyspace.tech
 
 RUN npm_config_target_arch=${TARGETARCH} yarn build:app:docker
 

@@ -1,0 +1,47 @@
+services:
+  excalidraw:
+    build:
+      context: .
+      dockerfile: Dockerfile
+      args:
+        NODE_ENV: production
+        VITE_APP_WS_SERVER_URL: ${EXCALIDRAW_ROOM_URL:-https://draw-room.comfyspace.tech}
+    restart: unless-stopped
+    expose:
+      - "80"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.routers.excalidraw.entrypoints=http
+      - traefik.http.routers.excalidraw.rule=Host(`draw.comfyspace.tech`)
+      - traefik.http.services.excalidraw.loadbalancer.server.port=80
+    networks:
+      - coolify
+      - excalidraw
+    healthcheck:
+      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+  excalidraw-room:
+    image: excalidraw/excalidraw-room:latest
+    restart: unless-stopped
+    expose:
+      - "80"
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.routers.excalidraw-room.entrypoints=http
+      - traefik.http.routers.excalidraw-room.rule=Host(`draw-room.comfyspace.tech`)
+      - traefik.http.services.excalidraw-room.loadbalancer.server.port=80
+    networks:
+      - coolify
+      - excalidraw
+
+networks:
+  coolify:
+    external: true
+  excalidraw:
+    driver: bridge
