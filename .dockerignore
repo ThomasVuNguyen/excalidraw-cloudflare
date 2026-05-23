@@ -4,6 +4,10 @@
 !.eslintrc.json
 !.npmrc
 !.prettierrc
+!board-api/
+!board-api/**
+!deploy/
+!deploy/**
 !excalidraw-app/
 !package.json
 !public/
