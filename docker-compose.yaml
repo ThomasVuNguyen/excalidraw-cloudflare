@@ -19,6 +19,8 @@ services:
     networks:
       - coolify
       - excalidraw
+    depends_on:
+      - excalidraw-board-api
     healthcheck:
       test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
       interval: 30s
@@ -41,8 +43,23 @@ services:
       - coolify
       - excalidraw
 
+  excalidraw-board-api:
+    build:
+      context: .
+      dockerfile: board-api/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8787"
+    volumes:
+      - excalidraw_boards:/data
+    networks:
+      - excalidraw
+
 networks:
   coolify:
     external: true
   excalidraw:
     driver: bridge
+
+volumes:
+  excalidraw_boards:

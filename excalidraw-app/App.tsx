@@ -18,6 +18,7 @@ import { ErrorDialog } from "@excalidraw/excalidraw/components/ErrorDialog";
 import { OverwriteConfirmDialog } from "@excalidraw/excalidraw/components/OverwriteConfirm/OverwriteConfirm";
 import { openConfirmModal } from "@excalidraw/excalidraw/components/OverwriteConfirm/OverwriteConfirmState";
 import { ShareableLinkDialog } from "@excalidraw/excalidraw/components/ShareableLinkDialog";
+import { serializeAsJSON } from "@excalidraw/excalidraw/data/json";
 import Trans from "@excalidraw/excalidraw/components/Trans";
 import {
   APP_NAME,
@@ -63,7 +64,6 @@ import {
 } from "@excalidraw/excalidraw/data/library";
 
 import type { RemoteExcalidrawElement } from "@excalidraw/excalidraw/data/reconcile";
-import type { RestoredDataState } from "@excalidraw/excalidraw/data/restore";
 import type {
   FileId,
   NonDeletedExcalidrawElement,
@@ -102,6 +102,7 @@ import Collab, {
 } from "./collab/Collab";
 import { AppFooter } from "./components/AppFooter";
 import { AppMainMenu } from "./components/AppMainMenu";
+import { BoardDashboard } from "./components/BoardDashboard";
 import { AppWelcomeScreen } from "./components/AppWelcomeScreen";
 import {
   ExportToExcalidrawPlus,
@@ -148,6 +149,12 @@ import "./index.scss";
 
 import { ExcalidrawPlusPromoBanner } from "./components/ExcalidrawPlusPromoBanner";
 import { AppSidebar } from "./components/AppSidebar";
+import {
+  getBoard,
+  getBoardHref,
+  getBoardIdFromPath,
+  updateBoardScene,
+} from "./boardApi";
 
 import type { CollabAPI } from "./collab/Collab";
 
@@ -217,6 +224,7 @@ const shareableLinkConfirmDialog = {
 const initializeScene = async (opts: {
   collabAPI: CollabAPI | null;
   excalidrawAPI: ExcalidrawImperativeAPI;
+  boardId?: string | null;
 }): Promise<
   { scene: ExcalidrawInitialDataState | null } & (
     | { isExternalScene: true; id: string; key: string }
@@ -232,12 +240,7 @@ const initializeScene = async (opts: {
 
   const localDataState = importFromLocalStorage();
 
-  let scene: Omit<
-    RestoredDataState,
-    // we're not storing files in the scene database/localStorage, and instead
-    // fetch them async from a different store
-    "files"
-  > & {
+  let scene: ExcalidrawInitialDataState & {
     scrollToContent?: boolean;
   } = {
     elements: restoreElements(localDataState?.elements, null, {
@@ -248,11 +251,51 @@ const initializeScene = async (opts: {
   };
 
   let roomLinkData = getCollaborationLinkData(window.location.href);
+  if (opts.boardId) {
+    try {
+      const board = await getBoard(opts.boardId);
+      scene = {
+        ...board.scene,
+        elements: restoreElements(board.scene?.elements, null, {
+          repairBindings: true,
+          deleteInvisibleElements: true,
+        }),
+        appState: restoreAppState(
+          board.scene?.appState,
+          localDataState?.appState,
+        ),
+        files: board.scene?.files || {},
+      };
+      roomLinkData = {
+        roomId: board.roomId,
+        roomKey: board.roomKey,
+      };
+
+      const href = getBoardHref(board);
+      if (`${window.location.pathname}${window.location.hash}` !== href) {
+        window.history.replaceState(
+          {},
+          APP_NAME,
+          `${window.location.origin}${href}`,
+        );
+      }
+    } catch (error: any) {
+      return {
+        scene: {
+          appState: {
+            errorMessage: error.message || "Could not load drawing.",
+          },
+        },
+        isExternalScene: false,
+      };
+    }
+  }
+
   const isExternalScene = !!(id || jsonBackendMatch || roomLinkData);
   if (isExternalScene) {
     if (
       // don't prompt if scene is empty
-      !scene.elements.length ||
+      !scene.elements?.length ||
       // don't prompt for collab scenes because we don't override local storage
       roomLinkData ||
       // otherwise, prompt whether user wants to override current scene
@@ -309,7 +352,7 @@ const initializeScene = async (opts: {
       const request = await fetch(window.decodeURIComponent(url));
       const data = await loadFromBlob(await request.blob(), null, null);
       if (
-        !scene.elements.length ||
+        !scene.elements?.length ||
         (await openConfirmModal(shareableLinkConfirmDialog))
       ) {
         return { scene: data, isExternalScene };
@@ -329,19 +372,21 @@ const initializeScene = async (opts: {
   if (roomLinkData && opts.collabAPI) {
     const { excalidrawAPI } = opts;
 
-    const scene = await opts.collabAPI.startCollaboration(roomLinkData);
+    const collabScene = await opts.collabAPI.startCollaboration(roomLinkData);
+    const nextScene = collabScene || scene;
 
     return {
       // when collaborating, the state may have already been updated at this
       // point (we may have received updates from other clients), so reconcile
       // elements and appState with existing state
       scene: {
-        ...scene,
+        ...nextScene,
         appState: {
           ...restoreAppState(
             {
-              ...scene?.appState,
-              theme: localDataState?.appState?.theme || scene?.appState?.theme,
+              ...nextScene?.appState,
+              theme:
+                localDataState?.appState?.theme || nextScene?.appState?.theme,
             },
             excalidrawAPI.getAppState(),
           ),
@@ -350,7 +395,7 @@ const initializeScene = async (opts: {
           isLoading: false,
         },
         elements: reconcileElements(
-          scene?.elements || [],
+          (nextScene?.elements || []) as readonly OrderedExcalidrawElement[],
           excalidrawAPI.getSceneElementsIncludingDeleted() as RemoteExcalidrawElement[],
           excalidrawAPI.getAppState(),
         ),
@@ -372,7 +417,7 @@ const initializeScene = async (opts: {
   return { scene: null, isExternalScene: false };
 };
 
-const ExcalidrawWrapper = () => {
+const ExcalidrawWrapper = ({ boardId }: { boardId: string | null }) => {
   const excalidrawAPI = useExcalidrawAPI();
 
   const [errorMessage, setErrorMessage] = useState("");
@@ -396,6 +441,7 @@ const ExcalidrawWrapper = () => {
   }
 
   const debugCanvasRef = useRef<HTMLCanvasElement>(null);
+  const boardSaveTimeoutRef = useRef<number | null>(null);
 
   useEffect(() => {
     trackEvent("load", "frame", getFrame());
@@ -403,6 +449,14 @@ const ExcalidrawWrapper = () => {
     setTimeout(() => {
       trackEvent("load", "version", getVersion());
     }, VERSION_TIMEOUT);
+  }, []);
+
+  useEffect(() => {
+    return () => {
+      if (boardSaveTimeoutRef.current) {
+        window.clearTimeout(boardSaveTimeoutRef.current);
+      }
+    };
   }, []);
 
   const [, setShareDialogState] = useAtom(shareDialogStateAtom);
@@ -526,10 +580,12 @@ const ExcalidrawWrapper = () => {
       return;
     }
 
-    initializeScene({ collabAPI, excalidrawAPI }).then(async (data) => {
-      loadImages(data, /* isInitialLoad */ true);
-      initialStatePromiseRef.current.promise.resolve(data.scene);
-    });
+    initializeScene({ collabAPI, excalidrawAPI, boardId }).then(
+      async (data) => {
+        loadImages(data, /* isInitialLoad */ true);
+        initialStatePromiseRef.current.promise.resolve(data.scene);
+      },
+    );
 
     const onHashChange = async (event: HashChangeEvent) => {
       event.preventDefault();
@@ -543,7 +599,7 @@ const ExcalidrawWrapper = () => {
         }
         excalidrawAPI.updateScene({ appState: { isLoading: true } });
 
-        initializeScene({ collabAPI, excalidrawAPI }).then((data) => {
+        initializeScene({ collabAPI, excalidrawAPI, boardId }).then((data) => {
           loadImages(data);
           if (data.scene) {
             excalidrawAPI.updateScene({
@@ -649,7 +705,14 @@ const ExcalidrawWrapper = () => {
         false,
       );
     };
-  }, [isCollabDisabled, collabAPI, excalidrawAPI, setLangCode, loadImages]);
+  }, [
+    isCollabDisabled,
+    collabAPI,
+    excalidrawAPI,
+    setLangCode,
+    loadImages,
+    boardId,
+  ]);
 
   useEffect(() => {
     const unloadHandler = (event: BeforeUnloadEvent) => {
@@ -685,9 +748,27 @@ const ExcalidrawWrapper = () => {
       collabAPI.syncElements(elements);
     }
 
+    if (boardId) {
+      if (boardSaveTimeoutRef.current) {
+        window.clearTimeout(boardSaveTimeoutRef.current);
+      }
+      boardSaveTimeoutRef.current = window.setTimeout(() => {
+        const scene = JSON.parse(
+          serializeAsJSON(elements, appState, files, "local"),
+        );
+        updateBoardScene(boardId, {
+          elements: scene.elements,
+          appState: scene.appState,
+          files: scene.files || {},
+        }).catch((error) => {
+          console.error("Failed to save board scene", error);
+        });
+      }, 1000);
+    }
+
     // this check is redundant, but since this is a hot path, it's best
     // not to evaludate the nested expression every time
-    if (!LocalData.isSavePaused()) {
+    if (!boardId && !LocalData.isSavePaused()) {
       LocalData.save(elements, appState, files, () => {
         if (excalidrawAPI) {
           let didChange = false;
@@ -1282,11 +1363,16 @@ const ExcalidrawApp = () => {
     return <ExcalidrawPlusIframeExport />;
   }
 
+  const boardId = getBoardIdFromPath();
+  if (!boardId) {
+    return <BoardDashboard />;
+  }
+
   return (
     <TopErrorBoundary>
       <Provider store={appJotaiStore}>
         <ExcalidrawAPIProvider>
-          <ExcalidrawWrapper />
+          <ExcalidrawWrapper boardId={boardId} />
         </ExcalidrawAPIProvider>
       </Provider>
     </TopErrorBoundary>
