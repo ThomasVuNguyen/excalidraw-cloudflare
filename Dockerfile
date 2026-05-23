@@ -11,6 +11,7 @@ RUN --mount=type=cache,target=/root/.cache/yarn \
 
 ARG NODE_ENV=production
 ARG VITE_APP_WS_SERVER_URL=https://draw-room.comfyspace.tech
+ARG VITE_APP_ENABLE_EXCALIDRAW_PLUS=false
 
 RUN npm_config_target_arch=${TARGETARCH} yarn build:app:docker
 

@@ -56,6 +56,9 @@ export const COOKIES = {
   AUTH_STATE_COOKIE: "excplus-auth",
 } as const;
 
-export const isExcalidrawPlusSignedUser = document.cookie.includes(
-  COOKIES.AUTH_STATE_COOKIE,
-);
+export const isExcalidrawPlusEnabled =
+  import.meta.env.VITE_APP_ENABLE_EXCALIDRAW_PLUS === "true";
+
+export const isExcalidrawPlusSignedUser =
+  document.cookie.includes(COOKIES.AUTH_STATE_COOKIE) &&
+  isExcalidrawPlusEnabled;

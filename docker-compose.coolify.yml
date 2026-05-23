@@ -6,6 +6,7 @@ services:
       args:
         NODE_ENV: production
         VITE_APP_WS_SERVER_URL: ${EXCALIDRAW_ROOM_URL:-https://draw-room.comfyspace.tech}
+        VITE_APP_ENABLE_EXCALIDRAW_PLUS: "false"
     restart: unless-stopped
     expose:
       - "80"

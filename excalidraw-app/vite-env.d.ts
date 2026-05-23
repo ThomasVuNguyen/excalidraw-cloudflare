@@ -36,6 +36,8 @@ interface ImportMetaEnv {
 
   VITE_APP_PLUS_APP: string;
 
+  VITE_APP_ENABLE_EXCALIDRAW_PLUS: string;
+
   VITE_APP_GIT_SHA: string;
 
   MODE: string;

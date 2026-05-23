@@ -6,10 +6,16 @@ import {
 import { LinkButton } from "@excalidraw/excalidraw/components/LinkButton";
 import { useUIAppState } from "@excalidraw/excalidraw/context/ui-appState";
 
+import { isExcalidrawPlusEnabled } from "../app_constants";
+
 import "./AppSidebar.scss";
 
 export const AppSidebar = () => {
   const { theme, openSidebar } = useUIAppState();
+
+  if (!isExcalidrawPlusEnabled) {
+    return <DefaultSidebar />;
+  }
 
   return (
     <DefaultSidebar>
