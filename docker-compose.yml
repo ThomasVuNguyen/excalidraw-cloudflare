@@ -1,23 +1,79 @@
 services:
-  excalidraw:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=file:/app/prisma/dev.db
+      - PORT=8000
+      - NODE_ENV=production
+      - AUTH_MODE=${AUTH_MODE:-local}
+      - FRONTEND_URL=https://draw.comfyspace.tech
+      - TRUST_PROXY=1
+      - ENFORCE_HTTPS_REDIRECT=false
+      - UPDATE_CHECK_OUTBOUND=false
+      - JWT_SECRET=${JWT_SECRET:-}
+      - CSRF_SECRET=${CSRF_SECRET:-}
+    volumes:
+      - backend_data:/app/prisma
+    networks:
+      - excalidash
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:8000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  frontend:
     build:
       context: .
-      args:
-        - NODE_ENV=development
-    container_name: excalidraw
-    ports:
-      - "3000:80"
-    restart: on-failure
-    stdin_open: true
-    healthcheck:
-      disable: true
+      dockerfile: frontend/Dockerfile
+    restart: unless-stopped
+    expose:
+      - "80"
     environment:
-      - NODE_ENV=development
-    volumes:
-      - ./:/opt/node_app/app:delegated
-      - ./package.json:/opt/node_app/package.json
-      - ./yarn.lock:/opt/node_app/yarn.lock
-      - notused:/opt/node_app/app/node_modules
+      - BACKEND_URL=backend:8000
+    labels:
+      - traefik.enable=true
+      - traefik.docker.network=coolify
+      - traefik.http.routers.excalidash.entrypoints=http
+      - traefik.http.routers.excalidash.rule=Host(`draw.comfyspace.tech`)
+      - traefik.http.services.excalidash.loadbalancer.server.port=80
+    depends_on:
+      - backend
+    networks:
+      - coolify
+      - excalidash
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:80",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 10s
+
+networks:
+  coolify:
+    external: true
+  excalidash:
+    driver: bridge
 
 volumes:
-  notused:
+  backend_data:

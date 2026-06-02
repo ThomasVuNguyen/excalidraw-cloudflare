@@ -1,29 +1,133 @@
-.DS_Store
-.env.development.local
+# Dependencies
+frontend/node_modules
+backend/node_modules
+
+# Database
+backend/prisma/*.db
+backend/prisma/**/*.db
+backend/prisma/*.db-journal
+backend/prisma/**/*.db-journal
+backend/prisma/dev.db
+backend/prisma/e2e-test.db
+backend/prisma/*.backup
+
+# SQLite artifacts anywhere (avoid committing dev DBs)
+*.db
+*.db-journal
+*.db-wal
+*.db-shm
+*.db.backup
+
+# Docker-entrypoint persisted secrets/locks (in case prisma volume is bind-mounted)
+backend/prisma/.jwt_secret
+backend/prisma/.csrf_secret
+backend/prisma/.migration-lock/
+
+# Local OIDC/Keycloak dev files
+docker-compose.oidc.local.yml
+ops/keycloak/realm-excalidash-local.json
+
+# Uploads
+backend/uploads/
+
+# Generated files
+backend/src/generated/
+
+# Environment variables
+.env
 .env.local
-.env.production.local
-.env.test.local
-.envrc
-.eslintcache
-.history
-.idea
-.vercel
-.vscode
-.yarn
+.env.production
+.env.staging
+
+# Build outputs
+frontend/dist/
+frontend/build/
+backend/dist/
+
+# Generated Excalidraw assets (copied from node_modules for runtime)
+frontend/public/excalidraw-assets/
+frontend/public/excalidraw-assets-dev/
+frontend/public/fonts/
+
+# E2E Testing
+e2e/node_modules/
+e2e/test-results/
+e2e/test-results-user/
+e2e/playwright-report/
+e2e/playwright-report-user/
+e2e/.playwright/
+
+# Temporary files
+*.tmp
+*.temp
+*.bak
+
+# Test artifacts (in case they appear in other locations)
+**/playwright-report/
+**/test-results/
+**/playwright/.cache/
+
+# Docker volumes (if any temporary ones are created)
+docker-volumes/
+
+# Logs
 *.log
-*.tgz
-build
-dist
-firebase
-logs
-node_modules
+logs/
 npm-debug.log*
-package-lock.json
 yarn-debug.log*
 yarn-error.log*
-packages/excalidraw/types
-coverage
-dev-dist
-html
-meta*.json
-.claude
+
+# Runtime data
+pids
+*.pid
+*.seed
+*.pid.lock
+
+# Coverage directory used by tools like istanbul
+coverage/
+*.lcov
+
+# Vitest cache
+.vitest/
+
+# Playwright screenshots/videos on failure
+**/screenshots/
+**/videos/
+
+# Dependency directories
+jspm_packages/
+
+# Optional npm cache directory
+.npm
+
+# Optional REPL history
+.node_repl_history
+
+# Output of 'npm pack'
+*.tgz
+
+# Yarn Integrity file
+.yarn-integrity
+
+# dotenv environment variables file
+.env.test
+
+# IDE/Editor files
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS generated files
+.DS_Store
+.DS_Store?
+._*
+.Spotlight-V100
+.Trashes
+ehthumbs.db
+Thumbs.db
+
+# Temporary files
+*.tmp
+*.temp

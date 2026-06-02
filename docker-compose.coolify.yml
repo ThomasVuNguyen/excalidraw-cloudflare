@@ -1,65 +1,79 @@
 services:
-  excalidraw:
+  backend:
+    build:
+      context: ./backend
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    expose:
+      - "8000"
+    environment:
+      - DATABASE_URL=file:/app/prisma/dev.db
+      - PORT=8000
+      - NODE_ENV=production
+      - AUTH_MODE=${AUTH_MODE:-local}
+      - FRONTEND_URL=https://draw.comfyspace.tech
+      - TRUST_PROXY=1
+      - ENFORCE_HTTPS_REDIRECT=false
+      - UPDATE_CHECK_OUTBOUND=false
+      - JWT_SECRET=${JWT_SECRET:-}
+      - CSRF_SECRET=${CSRF_SECRET:-}
+    volumes:
+      - backend_data:/app/prisma
+    networks:
+      - excalidash
+    healthcheck:
+      test:
+        [
+          "CMD",
+          "node",
+          "-e",
+          "require('http').get('http://127.0.0.1:8000/health', (r) => process.exit(r.statusCode === 200 ? 0 : 1))",
+        ]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 30s
+
+  frontend:
     build:
       context: .
-      dockerfile: Dockerfile
-      args:
-        NODE_ENV: production
-        VITE_APP_WS_SERVER_URL: ${EXCALIDRAW_ROOM_URL:-https://draw-room.comfyspace.tech}
-        VITE_APP_ENABLE_EXCALIDRAW_PLUS: "false"
+      dockerfile: frontend/Dockerfile
     restart: unless-stopped
     expose:
       - "80"
+    environment:
+      - BACKEND_URL=backend:8000
     labels:
       - traefik.enable=true
       - traefik.docker.network=coolify
-      - traefik.http.routers.excalidraw.entrypoints=http
-      - traefik.http.routers.excalidraw.rule=Host(`draw.comfyspace.tech`)
-      - traefik.http.services.excalidraw.loadbalancer.server.port=80
+      - traefik.http.routers.excalidash.entrypoints=http
+      - traefik.http.routers.excalidash.rule=Host(`draw.comfyspace.tech`)
+      - traefik.http.services.excalidash.loadbalancer.server.port=80
+    depends_on:
+      - backend
     networks:
       - coolify
-      - excalidraw
-    depends_on:
-      - excalidraw-board-api
+      - excalidash
     healthcheck:
-      test: ["CMD", "wget", "-q", "-O", "/dev/null", "http://127.0.0.1/"]
+      test:
+        [
+          "CMD",
+          "wget",
+          "--quiet",
+          "--tries=1",
+          "--spider",
+          "http://127.0.0.1:80",
+        ]
       interval: 30s
       timeout: 10s
       retries: 3
       start_period: 10s
 
-  excalidraw-room:
-    image: excalidraw/excalidraw-room:latest
-    restart: unless-stopped
-    expose:
-      - "80"
-    labels:
-      - traefik.enable=true
-      - traefik.docker.network=coolify
-      - traefik.http.routers.excalidraw-room.entrypoints=http
-      - traefik.http.routers.excalidraw-room.rule=Host(`draw-room.comfyspace.tech`)
-      - traefik.http.services.excalidraw-room.loadbalancer.server.port=80
-    networks:
-      - coolify
-      - excalidraw
-
-  excalidraw-board-api:
-    build:
-      context: .
-      dockerfile: board-api/Dockerfile
-    restart: unless-stopped
-    expose:
-      - "8787"
-    volumes:
-      - excalidraw_boards:/data
-    networks:
-      - excalidraw
-
 networks:
   coolify:
     external: true
-  excalidraw:
+  excalidash:
     driver: bridge
 
 volumes:
-  excalidraw_boards:
+  backend_data:

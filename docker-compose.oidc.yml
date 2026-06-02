@@ -1,0 +1,34 @@
+services:
+  # Local OIDC provider for development (Keycloak).
+  #
+  # Usage:
+  #   docker compose -f docker-compose.oidc.yml up -d
+  #
+  # Keycloak Admin UI:
+  #   http://localhost:8080/admin
+  keycloak:
+    # Pin the default image for reproducible local dev.
+    # Override if needed: `export KEYCLOAK_IMAGE=quay.io/keycloak/keycloak:<version>`
+    image: ${KEYCLOAK_IMAGE:-quay.io/keycloak/keycloak:24.0.5}
+    command: ["start-dev", "--import-realm"]
+    environment:
+      - KEYCLOAK_ADMIN=${KEYCLOAK_ADMIN:-admin}
+      - KEYCLOAK_ADMIN_PASSWORD=${KEYCLOAK_ADMIN_PASSWORD:?set KEYCLOAK_ADMIN_PASSWORD in your shell or .env (do not commit it)}
+      # Browser-facing hostname for local development.
+      - KC_HOSTNAME=localhost
+      # Allow backend backchannel endpoints (token/jwks) to use internal request host.
+      - KC_HOSTNAME_BACKCHANNEL_DYNAMIC=true
+      - KC_HOSTNAME_STRICT=false
+    ports:
+      - "8080:8080"
+    volumes:
+      - ./oidc/keycloak/realm-excalidash.json:/opt/keycloak/data/import/realm-excalidash.json:ro,Z
+    networks:
+      - excalidash-network
+    restart: unless-stopped
+
+networks:
+  excalidash-network:
+    # Reuse the app network so backend can resolve "keycloak" directly.
+    name: excalidash_excalidash-network
+    external: true
