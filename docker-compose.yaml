@@ -20,7 +20,9 @@ services:
     volumes:
       - backend_data:/app/prisma
     networks:
-      - excalidash
+      excalidash:
+        aliases:
+          - excalidash-backend
     healthcheck:
       test:
         [
@@ -42,7 +44,7 @@ services:
     expose:
       - "80"
     environment:
-      - BACKEND_URL=backend:8000
+      - BACKEND_URL=excalidash-backend:8000
     labels:
       - traefik.enable=true
       - traefik.docker.network=coolify
