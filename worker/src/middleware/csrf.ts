@@ -48,7 +48,7 @@ export const csrfTokenRoute = async (c: Context<{ Bindings: Env; Variables: AppV
   
   const token = `${payloadB64}.${signatureB64}`;
   
-  const response = c.json({ token });
+  const response = c.json({ token, header: 'x-csrf-token' });
   
   // Set client ID cookie if not present
   const cookieHeader = c.req.header('Cookie');
@@ -69,7 +69,7 @@ export const csrfMiddleware = async (
     return next();
   }
 
-  const token = c.req.header('X-CSRF-Token');
+  const token = c.req.header('x-csrf-token') || c.req.header('X-CSRF-Token');
   if (!token) {
     return c.json({ error: 'CSRF token missing' }, 403);
   }

@@ -36,7 +36,8 @@ export interface Env {
   OIDC_EMAIL_CLAIM?: string;
   OIDC_REQUIRE_EMAIL_VERIFIED?: string;
   OIDC_JIT_PROVISIONING?: string;
-  OIDC_FIRST_USER_ADMIN?: string;
+  // Static Assets (optional binding)
+  ASSETS?: Fetcher;
 }
 
 // Hono app-level variables (set by middleware)
@@ -49,6 +50,7 @@ export interface AuthUser {
   id: string;
   email: string;
   username: string | null;
+  name?: string;
   role: "USER" | "ADMIN";
   isActive: boolean;
   mustResetPassword: boolean;

@@ -11,7 +11,9 @@ import { v4 as uuidv4 } from "uuid";
 
 import type { Env, AppVariables } from "./types";
 import { authRoutes } from "./routes/auth/index";
-import { dashboardRoutes } from "./routes/dashboard/index";
+import drawingsRouter from "./routes/dashboard/drawings";
+import collectionsRouter from "./routes/dashboard/collections";
+import libraryRouter from "./routes/dashboard/library";
 import { systemRoutes } from "./routes/system/index";
 import { csrfMiddleware, csrfTokenRoute } from "./middleware/csrf";
 import { authMiddleware } from "./middleware/auth";
@@ -35,7 +37,7 @@ app.use("*", async (c, next) => {
 // Security headers
 app.use("*", secureHeaders());
 
-// CORS — allow the configured frontend origin(s)
+// CORS — allow configured frontend origin(s) + same-origin requests
 app.use("*", async (c, next) => {
   const frontendUrl = c.env.FRONTEND_URL || "";
   const origins = frontendUrl
@@ -43,55 +45,42 @@ app.use("*", async (c, next) => {
     .map((o) => o.trim())
     .filter(Boolean);
 
-  // Add localhost dev origins
-  if (origins.length === 0) {
-    origins.push("http://localhost:5173", "http://localhost:6767");
-  }
+  // Add standard origins
+  origins.push(
+    "https://draw.beenex.company",
+    "https://api.draw.beenex.company",
+    "http://localhost:5173",
+    "http://localhost:8787"
+  );
 
   const corsHandler = cors({
     origin: origins,
     credentials: true,
     allowMethods: ["GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS"],
-    allowHeaders: ["Content-Type", "Authorization", "X-CSRF-Token", "X-Request-ID"],
-    exposeHeaders: ["X-Request-ID"],
+    allowHeaders: ["Content-Type", "Authorization", "X-CSRF-Token", "x-csrf-token", "X-Request-ID", "X-Imported-File"],
+    exposeHeaders: ["X-Request-ID", "x-csrf-token"],
     maxAge: 86400,
   });
 
   return corsHandler(c, next);
 });
 
-// ─── Health Check (before auth) ─────────────────────────────────────────────
+// ─── Health Check & CSRF (before auth & onboarding) ──────────────────────────
 
 app.get("/health", (c) => c.json({ status: "ok" }));
-
-// ─── CSRF Token Endpoint ────────────────────────────────────────────────────
+app.get("/api/health", (c) => c.json({ status: "ok" }));
 
 app.get("/csrf-token", csrfTokenRoute);
+app.get("/api/csrf-token", csrfTokenRoute);
 
 // ─── Auth Routes (before onboarding gate) ───────────────────────────────────
 
 app.route("/auth", authRoutes);
-
-// ─── Onboarding Gate ────────────────────────────────────────────────────────
-
-app.use("*", onboardingGate);
-
-// ─── CSRF Protection (for mutating routes below) ────────────────────────────
-
-app.use("*", csrfMiddleware);
-
-// ─── Auth Middleware (optional — sets c.var.user if token present) ───────────
-
-app.use("*", authMiddleware);
-
-// ─── API Routes ─────────────────────────────────────────────────────────────
-
-app.route("/drawings", dashboardRoutes);
-app.route("/system", systemRoutes);
+app.route("/api/auth", authRoutes);
 
 // ─── WebSocket Upgrade → Durable Object ─────────────────────────────────────
 
-app.get("/ws/drawing/:id", async (c) => {
+const handleWsUpgrade = async (c: any) => {
   const drawingId = c.req.param("id");
   const upgradeHeader = c.req.header("Upgrade");
 
@@ -109,11 +98,39 @@ app.get("/ws/drawing/:id", async (c) => {
   const newRequest = new Request(url.toString(), c.req.raw);
 
   return stub.fetch(newRequest);
+};
+
+app.get("/ws/drawing/:id", handleWsUpgrade);
+app.get("/api/ws/drawing/:id", handleWsUpgrade);
+
+// ─── Onboarding Gate, CSRF Protection, and Auth Middleware ─────────────────
+
+app.use("*", onboardingGate);
+app.use("*", csrfMiddleware);
+app.use("*", authMiddleware);
+
+// ─── Application API Routes ─────────────────────────────────────────────────
+
+app.route("/drawings", drawingsRouter);
+app.route("/api/drawings", drawingsRouter);
+
+app.route("/collections", collectionsRouter);
+app.route("/api/collections", collectionsRouter);
+
+app.route("/library", libraryRouter);
+app.route("/api/library", libraryRouter);
+
+app.route("/system", systemRoutes);
+app.route("/api/system", systemRoutes);
+
+// ─── Fallback (Assets / 404) ────────────────────────────────────────────────
+
+app.notFound(async (c) => {
+  if (c.env.ASSETS) {
+    return c.env.ASSETS.fetch(c.req.raw);
+  }
+  return c.json({ error: "Not found" }, 404);
 });
-
-// ─── 404 Fallback ───────────────────────────────────────────────────────────
-
-app.notFound((c) => c.json({ error: "Not found" }, 404));
 
 // ─── Error Handler ──────────────────────────────────────────────────────────
 
@@ -125,7 +142,5 @@ app.onError((err, c) => {
     status >= 400 && status < 600 ? status : 500
   );
 });
-
-// ─── Export ─────────────────────────────────────────────────────────────────
 
 export default app;

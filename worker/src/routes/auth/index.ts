@@ -12,16 +12,18 @@ import type { Env, AppVariables, AuthUser } from '../../types';
 const authRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 function setCookies(c: any, accessToken: string, refreshToken: string) {
-  const isProd = c.env.FRONTEND_URL?.startsWith('https');
-  const secure = isProd ? '; Secure' : '';
+  const host = c.req.header('host') || '';
+  const isLocalhost = host.startsWith('localhost') || host.startsWith('127.0.0.1');
+  const secure = !isLocalhost ? '; Secure' : '';
   
   c.header('Set-Cookie', `excalidash-access-token=${accessToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=900${secure}`, { append: true });
   c.header('Set-Cookie', `excalidash-refresh-token=${refreshToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure}`, { append: true });
 }
 
 function clearCookies(c: any) {
-  const isProd = c.env.FRONTEND_URL?.startsWith('https');
-  const secure = isProd ? '; Secure' : '';
+  const host = c.req.header('host') || '';
+  const isLocalhost = host.startsWith('localhost') || host.startsWith('127.0.0.1');
+  const secure = !isLocalhost ? '; Secure' : '';
   
   c.header('Set-Cookie', `excalidash-access-token=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`, { append: true });
   c.header('Set-Cookie', `excalidash-refresh-token=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`, { append: true });
@@ -52,19 +54,40 @@ authRouter.post('/login', async (c) => {
 
   setCookies(c, accessToken, refreshToken);
   
-  return c.json({ success: true });
+  const authUser: AuthUser = {
+    id: user.id as string,
+    email: user.email as string,
+    username: (user.username as string) || null,
+    name: (user.username as string) || (user.email as string).split('@')[0],
+    role: user.role as "USER" | "ADMIN",
+    isActive: true,
+    mustResetPassword: Boolean(user.must_reset_password),
+  };
+
+  return c.json({ success: true, user: authUser });
 });
 
 authRouter.post('/register', async (c) => {
-  const { email, password, username, setupCode } = await c.req.json();
-  
-  const usersCount = await c.env.DB.prepare('SELECT count(*) as count FROM users').first<{count: number}>();
-  const isFirstUser = usersCount && usersCount.count === 0;
-  
-  if (!isFirstUser && !setupCode) {
-    return c.json({ error: 'Registration requires invitation or setup code' }, 403);
+  const body = await c.req.json();
+  const email = (body.email || '').trim().toLowerCase();
+  const password = body.password || '';
+  const name = (body.name || body.username || '').trim();
+  const setupCode = body.setupCode ? String(body.setupCode).trim() : undefined;
+
+  if (!email || !password) {
+    return c.json({ error: 'Email and password are required' }, 400);
   }
-  
+
+  const usersCount = await c.env.DB.prepare('SELECT count(*) as count FROM users WHERE is_active = 1').first<{count: number}>();
+  const isFirstUser = !usersCount || usersCount.count === 0;
+
+  if (!isFirstUser && !setupCode) {
+    const config = await c.env.DB.prepare('SELECT registration_enabled FROM system_config WHERE id = ?').bind('default').first<{registration_enabled: number}>();
+    if (config && config.registration_enabled === 0) {
+      return c.json({ error: 'Registration is closed. An invitation or setup code is required.' }, 403);
+    }
+  }
+
   if (!isFirstUser && setupCode) {
     const config = await c.env.DB.prepare('SELECT bootstrap_setup_code_hash FROM system_config WHERE id = ?').bind('default').first();
     if (!config || !config.bootstrap_setup_code_hash || !timingSafeEqual(config.bootstrap_setup_code_hash as string, setupCode)) {
@@ -80,19 +103,43 @@ authRouter.post('/register', async (c) => {
   const id = crypto.randomUUID();
   const passwordHash = await hashPassword(password);
   const role = isFirstUser ? 'ADMIN' : 'USER';
-  
+  const now = new Date().toISOString();
+
   await c.env.DB.prepare(
-    'INSERT INTO users (id, email, password_hash, username, role, is_active) VALUES (?, ?, ?, ?, ?, 1)'
-  ).bind(id, email, passwordHash, username || null, role).run();
-  
-  // If first user, mark auth as enabled and onboarding complete
+    'INSERT INTO users (id, email, password_hash, username, role, is_active, created_at, updated_at) VALUES (?, ?, ?, ?, ?, 1, ?, ?)'
+  ).bind(id, email, passwordHash, name || email.split('@')[0], role, now, now).run();
+
+  // If first user, make sure system_config has auth_enabled = 1 and registration_enabled = 1
   if (isFirstUser) {
     await c.env.DB.prepare(
-      'UPDATE system_config SET auth_enabled = 1, updated_at = datetime("now") WHERE id = ?'
+      'UPDATE system_config SET auth_enabled = 1, registration_enabled = 1, updated_at = datetime("now") WHERE id = ?'
     ).bind('default').run();
   }
-  
-  return c.json({ success: true, role });
+
+  const { accessToken, refreshToken } = await generateTokens(
+    id,
+    c.env.JWT_SECRET,
+    role
+  );
+
+  const hashedRefresh = await hashToken(refreshToken);
+  await c.env.DB.prepare(
+    'INSERT INTO refresh_tokens (id, token_hash, user_id, expires_at) VALUES (?, ?, ?, datetime("now", "+7 days"))'
+  ).bind(crypto.randomUUID(), hashedRefresh, id).run();
+
+  setCookies(c, accessToken, refreshToken);
+
+  const authUser: AuthUser = {
+    id,
+    email,
+    username: name || email.split('@')[0],
+    name: name || email.split('@')[0],
+    role: role as "USER" | "ADMIN",
+    isActive: true,
+    mustResetPassword: false,
+  };
+
+  return c.json({ success: true, user: authUser }, 201);
 });
 
 authRouter.post('/refresh', async (c) => {
@@ -150,18 +197,29 @@ authRouter.post('/logout', requireAuth, async (c) => {
 
 authRouter.get('/me', requireAuth, async (c) => {
   const user = c.get('user') as AuthUser;
-  return c.json({ user });
+  return c.json({ 
+    user: {
+      ...user,
+      name: user.name || user.username || user.email.split('@')[0],
+    } 
+  });
 });
 
 authRouter.get('/status', async (c) => {
-  const usersCount = await c.env.DB.prepare('SELECT count(*) as count FROM users').first<{count: number}>();
+  const usersCount = await c.env.DB.prepare('SELECT count(*) as count FROM users WHERE is_active = 1').first<{count: number}>();
   const config = await c.env.DB.prepare('SELECT * FROM system_config WHERE id = ?').bind('default').first();
+  const isFirstUser = !usersCount || usersCount.count === 0;
+  const registrationEnabled = config ? Boolean(config.registration_enabled) : true;
   
   return c.json({
-    authMode: c.env.AUTH_MODE,
-    authEnabled: config ? Boolean(config.auth_enabled) : null,
-    onboardingComplete: config ? Boolean(config.auth_enabled) : false,
-    isFirstUser: usersCount ? usersCount.count === 0 : true
+    authMode: c.env.AUTH_MODE || "local",
+    authEnabled: true,
+    enabled: true,
+    registrationEnabled: isFirstUser ? true : registrationEnabled,
+    onboardingComplete: !isFirstUser,
+    isFirstUser,
+    bootstrapRequired: false,
+    authOnboardingRequired: false
   });
 });
 
@@ -172,7 +230,11 @@ authRouter.post('/onboarding-choice', async (c) => {
     'UPDATE system_config SET auth_enabled = ?, updated_at = datetime("now") WHERE id = ?'
   ).bind(enabled ? 1 : 0, 'default').run();
   
-  return c.json({ success: true });
+  return c.json({ 
+    authEnabled: Boolean(enabled), 
+    authOnboardingCompleted: true, 
+    bootstrapRequired: false 
+  });
 });
 
 authRouter.post('/auth-enabled', requireAuth, requireAdmin, async (c) => {
@@ -187,10 +249,11 @@ authRouter.post('/auth-enabled', requireAuth, requireAdmin, async (c) => {
 
 authRouter.put('/profile', requireAuth, async (c) => {
   const user = c.get('user') as AuthUser;
-  const { username } = await c.req.json();
+  const { username, name } = await c.req.json();
+  const newName = username || name;
   
   await c.env.DB.prepare('UPDATE users SET username = ?, updated_at = datetime("now") WHERE id = ?')
-    .bind(username, user.id).run();
+    .bind(newName, user.id).run();
   
   return c.json({ success: true });
 });

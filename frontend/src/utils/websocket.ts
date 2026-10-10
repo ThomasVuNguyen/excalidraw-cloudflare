@@ -171,9 +171,10 @@ export class ExcalidashSocket {
  * Drop-in replacement for Socket.IO's `io(url, opts)`.
  */
 export function connectToDrawingRoom(drawingId: string): ExcalidashSocket {
-  const baseUrl = import.meta.env.VITE_API_URL === '/api'
+  const envUrl = import.meta.env.VITE_API_URL;
+  const baseUrl = (!envUrl || envUrl.startsWith('/'))
     ? window.location.origin
-    : (import.meta.env.VITE_API_URL || 'http://localhost:8787');
+    : envUrl;
 
   // Convert http(s) to ws(s)
   const wsUrl = baseUrl.replace(/^http/, 'ws') + `/ws/drawing/${drawingId}`;

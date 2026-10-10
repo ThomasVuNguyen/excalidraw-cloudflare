@@ -7,11 +7,15 @@ export const onboardingGate = async (
 ) => {
   const path = new URL(c.req.url).pathname;
   
-  // Skip onboarding check for specific paths
+  // Skip onboarding check for public, health, csrf, and auth paths
   if (
+    path === '/health' || 
     path === '/api/health' || 
-    path.startsWith('/api/auth/') || 
-    path === '/api/csrf-token'
+    path === '/csrf-token' ||
+    path === '/api/csrf-token' ||
+    path.startsWith('/auth/') ||
+    path.startsWith('/api/auth/') ||
+    path.startsWith('/ws/')
   ) {
     return next();
   }
@@ -22,15 +26,26 @@ export const onboardingGate = async (
   }
 
   const config = await c.env.DB.prepare(
-    "SELECT value FROM system_config WHERE key = 'auth_enabled'"
-  ).first<{ value: string }>();
+    "SELECT auth_enabled FROM system_config WHERE id = 'default'"
+  ).first<{ auth_enabled: number }>();
 
-  if (!config) {
-    return c.json({ 
-      error: 'Auth onboarding required', 
-      code: 'AUTH_ONBOARDING_REQUIRED' 
-    }, 409);
+  // If auth is enabled, onboarding is not required
+  if (config && config.auth_enabled === 1) {
+    return next();
   }
 
-  await next();
+  // If there are already active users, onboarding is complete
+  const userCount = await c.env.DB.prepare(
+    "SELECT count(*) as count FROM users WHERE is_active = 1"
+  ).first<{ count: number }>();
+
+  if (userCount && userCount.count > 0) {
+    return next();
+  }
+
+  // Otherwise, onboarding choice is required
+  return c.json({ 
+    error: 'Auth onboarding required', 
+    code: 'AUTH_ONBOARDING_REQUIRED' 
+  }, 409);
 };
