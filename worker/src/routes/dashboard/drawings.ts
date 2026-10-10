@@ -27,6 +27,23 @@ function toTimestamp(dateVal: any): number {
   return isNaN(parsed) ? Date.now() : parsed;
 }
 
+async function hydrateR2Field(env: Env, val: any, fallback: any): Promise<any> {
+  if (typeof val === 'string' && val.startsWith('r2:')) {
+    try {
+      const key = val.slice(3);
+      const obj = await env.STORAGE.get(key);
+      if (obj) {
+        const text = await obj.text();
+        return parseJsonSafe(text, fallback);
+      }
+    } catch (e) {
+      console.error('Failed to read from R2:', e);
+    }
+    return fallback;
+  }
+  return parseJsonSafe(val, fallback);
+}
+
 function formatDrawing(d: any, accessLevel: string = 'owner') {
   return {
     id: d.id,
@@ -197,7 +214,10 @@ app.get('/:id', async (c) => {
 
   if (!hasAccess) return c.json({ error: 'Forbidden' }, 403);
 
-  return c.json(formatDrawing(drawing, accessLevel));
+  const formatted = formatDrawing(drawing, accessLevel);
+  formatted.files = await hydrateR2Field(c.env, drawing.files, {});
+  formatted.elements = await hydrateR2Field(c.env, drawing.elements, []);
+  return c.json(formatted);
 });
 
 // POST /
@@ -206,21 +226,44 @@ app.post('/', async (c) => {
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
   const body = await c.req.json();
-  const id = crypto.randomUUID();
-  const now = new Date().toISOString();
+  const id = body.id || crypto.randomUUID();
+  const now = body.createdAt ? new Date(body.createdAt).toISOString() : new Date().toISOString();
+  const updated = body.updatedAt ? new Date(body.updatedAt).toISOString() : now;
+
+  let filesVal = JSON.stringify(body.files || {});
+  if (filesVal.length > 800000) {
+    const key = `drawings/${id}/files.json`;
+    await c.env.STORAGE.put(key, filesVal, { httpMetadata: { contentType: 'application/json' } });
+    filesVal = `r2:${key}`;
+  }
+
+  let elementsVal = JSON.stringify(body.elements || []);
+  if (elementsVal.length > 1500000) {
+    const key = `drawings/${id}/elements.json`;
+    await c.env.STORAGE.put(key, elementsVal, { httpMetadata: { contentType: 'application/json' } });
+    elementsVal = `r2:${key}`;
+  }
+
+  let previewVal = body.preview || null;
+  if (previewVal && previewVal.length > 500000) {
+    previewVal = null;
+  }
 
   await c.env.DB.prepare(`
     INSERT INTO drawings (id, user_id, collection_id, name, elements, app_state, files, preview, version, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id, user.id, body.collectionId || null, body.name || 'Untitled Drawing',
-    JSON.stringify(body.elements || []), JSON.stringify(body.appState || {}),
-    JSON.stringify(body.files || {}), body.preview || null,
-    1, now, now
+    elementsVal, JSON.stringify(body.appState || {}),
+    filesVal, previewVal,
+    body.version || 1, now, updated
   ).run();
 
   const newDrawing = await c.env.DB.prepare('SELECT * FROM drawings WHERE id = ?').bind(id).first();
-  return c.json(formatDrawing(newDrawing, 'owner'), 201);
+  const formatted = formatDrawing(newDrawing, 'owner');
+  formatted.files = await hydrateR2Field(c.env, newDrawing?.files, {});
+  formatted.elements = await hydrateR2Field(c.env, newDrawing?.elements, []);
+  return c.json(formatted, 201);
 });
 
 // PUT /:id
@@ -259,22 +302,39 @@ app.put('/:id', async (c) => {
     current.elements as string, current.app_state as string, current.files as string, current.updated_at as string
   ).run();
 
+  let filesVal = body.files !== undefined ? JSON.stringify(body.files) : null;
+  if (filesVal && filesVal.length > 800000) {
+    const key = `drawings/${id}/files.json`;
+    await c.env.STORAGE.put(key, filesVal, { httpMetadata: { contentType: 'application/json' } });
+    filesVal = `r2:${key}`;
+  }
+
+  let elementsVal = body.elements !== undefined ? JSON.stringify(body.elements) : null;
+  if (elementsVal && elementsVal.length > 1500000) {
+    const key = `drawings/${id}/elements.json`;
+    await c.env.STORAGE.put(key, elementsVal, { httpMetadata: { contentType: 'application/json' } });
+    elementsVal = `r2:${key}`;
+  }
+
+  let previewVal = body.preview !== undefined ? (body.preview && body.preview.length > 500000 ? null : body.preview) : undefined;
+
   // Update drawing
   await c.env.DB.prepare(`
     UPDATE drawings
     SET elements = COALESCE(?, elements),
         app_state = COALESCE(?, app_state),
         files = COALESCE(?, files),
-        preview = COALESCE(?, preview),
+        preview = CASE WHEN ? IS NOT NULL THEN ? ELSE preview END,
         name = COALESCE(?, name),
         version = ?,
         updated_at = ?
     WHERE id = ?
   `).bind(
-    body.elements ? JSON.stringify(body.elements) : null,
+    elementsVal,
     body.appState ? JSON.stringify(body.appState) : null,
-    body.files ? JSON.stringify(body.files) : null,
-    body.preview || null,
+    filesVal,
+    previewVal !== undefined ? 'set' : null,
+    previewVal ?? null,
     body.name || null,
     nextVersion,
     now,
@@ -282,7 +342,10 @@ app.put('/:id', async (c) => {
   ).run();
 
   const updated = await c.env.DB.prepare('SELECT * FROM drawings WHERE id = ?').bind(id).first();
-  return c.json(formatDrawing(updated, user && current.user_id === user.id ? 'owner' : 'edit'));
+  const formatted = formatDrawing(updated, user && current.user_id === user.id ? 'owner' : 'edit');
+  formatted.files = await hydrateR2Field(c.env, updated?.files, {});
+  formatted.elements = await hydrateR2Field(c.env, updated?.elements, []);
+  return c.json(formatted);
 });
 
 // DELETE /:id
@@ -290,6 +353,17 @@ app.delete('/:id', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
   const id = c.req.param('id');
+
+  const current = await c.env.DB.prepare('SELECT files, elements FROM drawings WHERE id = ? AND user_id = ?').bind(id, user.id).first();
+  if (current) {
+    if (typeof current.files === 'string' && current.files.startsWith('r2:')) {
+      await c.env.STORAGE.delete(current.files.slice(3)).catch(() => {});
+    }
+    if (typeof current.elements === 'string' && current.elements.startsWith('r2:')) {
+      await c.env.STORAGE.delete(current.elements.slice(3)).catch(() => {});
+    }
+  }
+
   const result = await c.env.DB.prepare('DELETE FROM drawings WHERE id = ? AND user_id = ?').bind(id, user.id).run();
   if (!result.success || result.meta.changes === 0) return c.json({ error: 'Not found or not owner' }, 404);
   return c.json({ success: true });

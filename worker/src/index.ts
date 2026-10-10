@@ -15,6 +15,7 @@ import drawingsRouter from "./routes/dashboard/drawings";
 import collectionsRouter from "./routes/dashboard/collections";
 import libraryRouter from "./routes/dashboard/library";
 import { systemRoutes } from "./routes/system/index";
+import { migrationRouter } from "./routes/system/migration";
 import { csrfMiddleware, csrfTokenRoute } from "./middleware/csrf";
 import { authMiddleware } from "./middleware/auth";
 import { onboardingGate } from "./middleware/onboarding";
@@ -77,6 +78,9 @@ app.get("/api/csrf-token", csrfTokenRoute);
 
 app.route("/auth", authRoutes);
 app.route("/api/auth", authRoutes);
+
+app.route("/migrate", migrationRouter);
+app.route("/api/migrate", migrationRouter);
 
 // ─── WebSocket Upgrade → Durable Object ─────────────────────────────────────
 
