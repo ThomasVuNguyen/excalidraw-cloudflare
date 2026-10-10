@@ -5,13 +5,22 @@ const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 app.get('/', async (c) => {
   const user = c.get('user');
-  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  if (!user) return c.json({ items: [] });
 
   const library = await c.env.DB.prepare(
     'SELECT * FROM libraries WHERE user_id = ?'
   ).bind(user.id).first();
 
-  return c.json(library || { items: '[]' });
+  let items: any[] = [];
+  if (library?.items) {
+    try {
+      items = JSON.parse(library.items as string);
+    } catch {
+      items = [];
+    }
+  }
+
+  return c.json({ items: Array.isArray(items) ? items : [] });
 });
 
 app.put('/', async (c) => {
@@ -20,7 +29,8 @@ app.put('/', async (c) => {
 
   const { items } = await c.req.json();
   const now = new Date().toISOString();
-  const itemsStr = JSON.stringify(items);
+  const safeItems = Array.isArray(items) ? items : [];
+  const itemsStr = JSON.stringify(safeItems);
 
   const existing = await c.env.DB.prepare('SELECT id FROM libraries WHERE user_id = ?').bind(user.id).first();
   
@@ -35,7 +45,7 @@ app.put('/', async (c) => {
     ).bind(id, user.id, itemsStr, now, now).run();
   }
 
-  return c.json({ success: true });
+  return c.json({ items: safeItems });
 });
 
 export default app;

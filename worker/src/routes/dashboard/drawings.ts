@@ -10,51 +10,147 @@ async function sha256(message: string): Promise<string> {
   return hashArray.map(b => b.toString(16).padStart(2, '0')).join('');
 }
 
+function parseJsonSafe<T>(val: any, fallback: T): T {
+  if (val === null || val === undefined) return fallback;
+  if (typeof val !== 'string') return val as T;
+  try {
+    return JSON.parse(val) as T;
+  } catch {
+    return fallback;
+  }
+}
+
+function toTimestamp(dateVal: any): number {
+  if (!dateVal) return Date.now();
+  if (typeof dateVal === 'number') return dateVal;
+  const parsed = Date.parse(String(dateVal));
+  return isNaN(parsed) ? Date.now() : parsed;
+}
+
+function formatDrawing(d: any, accessLevel: string = 'owner') {
+  return {
+    id: d.id,
+    userId: d.user_id,
+    name: d.name,
+    collectionId: d.collection_id || null,
+    elements: parseJsonSafe(d.elements, []),
+    appState: parseJsonSafe(d.app_state, {}),
+    files: parseJsonSafe(d.files, {}),
+    preview: d.preview || null,
+    version: d.version ?? 1,
+    createdAt: toTimestamp(d.created_at),
+    updatedAt: toTimestamp(d.updated_at),
+    accessLevel,
+  };
+}
+
+function formatDrawingSummary(d: any, accessLevel: string = 'owner') {
+  return {
+    id: d.id,
+    name: d.name,
+    collectionId: d.collection_id || null,
+    preview: d.preview || null,
+    version: d.version ?? 1,
+    createdAt: toTimestamp(d.created_at),
+    updatedAt: toTimestamp(d.updated_at),
+    accessLevel,
+  };
+}
+
 // GET /
 app.get('/', async (c) => {
   const user = c.get('user');
-  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  if (!user) return c.json({ drawings: [], totalCount: 0, limit: 20, offset: 0 });
 
   const limit = parseInt(c.req.query('limit') || '20', 10);
   const offset = parseInt(c.req.query('offset') || '0', 10);
   const search = c.req.query('search');
   const collectionId = c.req.query('collectionId');
+  const includeData = c.req.query('includeData') === 'true';
   const sortField = c.req.query('sortField') || 'updatedAt';
   const sortDirection = c.req.query('sortDirection') === 'asc' ? 'ASC' : 'DESC';
 
-  let query = 'SELECT * FROM drawings WHERE user_id = ?';
+  let where = 'WHERE user_id = ?';
   const params: any[] = [user.id];
 
-  if (collectionId) {
-    query += ' AND collection_id = ?';
+  if (collectionId === 'null') {
+    where += ' AND collection_id IS NULL';
+  } else if (collectionId) {
+    where += ' AND collection_id = ?';
     params.push(collectionId);
   }
+
   if (search) {
-    query += ' AND name LIKE ?';
+    where += ' AND name LIKE ?';
     params.push(`%${search}%`);
   }
 
+  const countRow = await c.env.DB.prepare(`SELECT count(*) as count FROM drawings ${where}`).bind(...params).first<{ count: number }>();
+  const totalCount = countRow ? countRow.count : 0;
+
   const dbSortField = sortField === 'name' ? 'name' : sortField === 'createdAt' ? 'created_at' : 'updated_at';
-  query += ` ORDER BY ${dbSortField} ${sortDirection} LIMIT ? OFFSET ?`;
+  const query = `SELECT * FROM drawings ${where} ORDER BY ${dbSortField} ${sortDirection} LIMIT ? OFFSET ?`;
   params.push(limit, offset);
 
   const { results } = await c.env.DB.prepare(query).bind(...params).all();
-  return c.json(results);
+  const drawings = results.map(d => includeData ? formatDrawing(d, 'owner') : formatDrawingSummary(d, 'owner'));
+
+  return c.json({
+    drawings,
+    totalCount,
+    limit,
+    offset,
+  });
 });
 
 // GET /shared
 app.get('/shared', async (c) => {
   const user = c.get('user');
-  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  if (!user) return c.json({ drawings: [], totalCount: 0, limit: 20, offset: 0 });
 
-  const { results } = await c.env.DB.prepare(`
+  const limit = parseInt(c.req.query('limit') || '20', 10);
+  const offset = parseInt(c.req.query('offset') || '0', 10);
+  const search = c.req.query('search');
+  const includeData = c.req.query('includeData') === 'true';
+
+  let where = 'WHERE dp.user_id = ?';
+  const params: any[] = [user.id];
+
+  if (search) {
+    where += ' AND d.name LIKE ?';
+    params.push(`%${search}%`);
+  }
+
+  const countRow = await c.env.DB.prepare(`
+    SELECT count(*) as count
+    FROM drawings d
+    JOIN drawing_permissions dp ON d.id = dp.drawing_id
+    ${where}
+  `).bind(...params).first<{ count: number }>();
+  const totalCount = countRow ? countRow.count : 0;
+
+  const query = `
     SELECT d.*, dp.permission AS access_level
     FROM drawings d
     JOIN drawing_permissions dp ON d.id = dp.drawing_id
-    WHERE dp.user_id = ?
-  `).bind(user.id).all();
+    ${where}
+    ORDER BY d.updated_at DESC
+    LIMIT ? OFFSET ?
+  `;
+  params.push(limit, offset);
 
-  return c.json(results);
+  const { results } = await c.env.DB.prepare(query).bind(...params).all();
+  const drawings = results.map(d => {
+    const level = (d.access_level as string) || 'view';
+    return includeData ? formatDrawing(d, level) : formatDrawingSummary(d, level);
+  });
+
+  return c.json({
+    drawings,
+    totalCount,
+    limit,
+    offset,
+  });
 });
 
 // GET /:id
@@ -64,14 +160,14 @@ app.get('/:id', async (c) => {
   const shareToken = c.req.query('shareToken');
 
   const drawing = await c.env.DB.prepare('SELECT * FROM drawings WHERE id = ?').bind(id).first();
-  if (!drawing) return c.json({ error: 'Not found' }, 404);
+  if (!drawing) return c.json({ error: 'Drawing not found', message: 'Drawing does not exist' }, 404);
 
   let hasAccess = false;
   let accessLevel = 'view';
 
   if (user && drawing.user_id === user.id) {
     hasAccess = true;
-    accessLevel = 'edit';
+    accessLevel = 'owner';
   }
 
   if (!hasAccess && user) {
@@ -95,9 +191,13 @@ app.get('/:id', async (c) => {
     }
   }
 
+  if (!hasAccess && !user) {
+    return c.json({ error: 'Unauthorized' }, 401);
+  }
+
   if (!hasAccess) return c.json({ error: 'Forbidden' }, 403);
 
-  return c.json({ ...drawing, accessLevel });
+  return c.json(formatDrawing(drawing, accessLevel));
 });
 
 // POST /
@@ -113,14 +213,14 @@ app.post('/', async (c) => {
     INSERT INTO drawings (id, user_id, collection_id, name, elements, app_state, files, preview, version, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
-    id, user.id, body.collectionId || null, body.name || 'Untitled',
+    id, user.id, body.collectionId || null, body.name || 'Untitled Drawing',
     JSON.stringify(body.elements || []), JSON.stringify(body.appState || {}),
     JSON.stringify(body.files || {}), body.preview || null,
     1, now, now
   ).run();
 
   const newDrawing = await c.env.DB.prepare('SELECT * FROM drawings WHERE id = ?').bind(id).first();
-  return c.json(newDrawing, 201);
+  return c.json(formatDrawing(newDrawing, 'owner'), 201);
 });
 
 // PUT /:id
@@ -137,16 +237,18 @@ app.put('/:id', async (c) => {
   if (user && current.user_id === user.id) hasEdit = true;
   else if (user) {
     const perm = await c.env.DB.prepare('SELECT permission FROM drawing_permissions WHERE drawing_id = ? AND user_id = ?').bind(id, user.id).first();
-    if (perm && perm.permission === 'edit') hasEdit = true;
+    if (perm && (perm.permission === 'edit' || perm.permission === 'owner')) hasEdit = true;
   }
   
   if (!hasEdit) {
     return c.json({ error: 'Forbidden' }, 403);
   }
 
-  if (current.version !== body.version) {
+  if (body.version !== undefined && current.version !== body.version) {
     return c.json({ error: 'VERSION_CONFLICT', currentVersion: current.version }, 409);
   }
+
+  const nextVersion = (current.version as number) + 1;
 
   // Create snapshot
   await c.env.DB.prepare(`
@@ -160,14 +262,27 @@ app.put('/:id', async (c) => {
   // Update drawing
   await c.env.DB.prepare(`
     UPDATE drawings
-    SET elements = ?, app_state = ?, files = ?, preview = ?, name = COALESCE(?, name), version = version + 1, updated_at = ?
-    WHERE id = ? AND version = ?
+    SET elements = COALESCE(?, elements),
+        app_state = COALESCE(?, app_state),
+        files = COALESCE(?, files),
+        preview = COALESCE(?, preview),
+        name = COALESCE(?, name),
+        version = ?,
+        updated_at = ?
+    WHERE id = ?
   `).bind(
-    JSON.stringify(body.elements || []), JSON.stringify(body.appState || {}), JSON.stringify(body.files || {}),
-    body.preview || null, body.name, now, id, current.version
+    body.elements ? JSON.stringify(body.elements) : null,
+    body.appState ? JSON.stringify(body.appState) : null,
+    body.files ? JSON.stringify(body.files) : null,
+    body.preview || null,
+    body.name || null,
+    nextVersion,
+    now,
+    id
   ).run();
 
-  return c.json({ success: true, version: (current.version as number) + 1 });
+  const updated = await c.env.DB.prepare('SELECT * FROM drawings WHERE id = ?').bind(id).first();
+  return c.json(formatDrawing(updated, user && current.user_id === user.id ? 'owner' : 'edit'));
 });
 
 // DELETE /:id
@@ -201,7 +316,7 @@ app.post('/:id/duplicate', async (c) => {
   ).run();
 
   const duplicated = await c.env.DB.prepare('SELECT * FROM drawings WHERE id = ?').bind(newId).first();
-  return c.json(duplicated, 201);
+  return c.json(formatDrawing(duplicated, 'owner'), 201);
 });
 
 // History: GET /:id/history
@@ -232,6 +347,7 @@ app.post('/:id/history/:snapshotId/restore', async (c) => {
   if (!snapshot) return c.json({ error: 'Snapshot not found' }, 404);
 
   const now = new Date().toISOString();
+  const nextVersion = (current.version as number) + 1;
 
   await c.env.DB.prepare(`
     INSERT INTO drawing_snapshots (id, drawing_id, version, elements, app_state, files, created_at)
@@ -239,11 +355,12 @@ app.post('/:id/history/:snapshotId/restore', async (c) => {
   `).bind(crypto.randomUUID(), id, current.version, current.elements, current.app_state, current.files, now).run();
 
   await c.env.DB.prepare(`
-    UPDATE drawings SET elements = ?, app_state = ?, files = ?, version = version + 1, updated_at = ?
+    UPDATE drawings SET elements = ?, app_state = ?, files = ?, version = ?, updated_at = ?
     WHERE id = ?
-  `).bind(snapshot.elements, snapshot.app_state, snapshot.files, now, id).run();
+  `).bind(snapshot.elements, snapshot.app_state, snapshot.files, nextVersion, now, id).run();
 
-  return c.json({ success: true });
+  const updated = await c.env.DB.prepare('SELECT * FROM drawings WHERE id = ?').bind(id).first();
+  return c.json(formatDrawing(updated, 'owner'));
 });
 
 // Sharing: GET /:id/sharing
@@ -254,13 +371,13 @@ app.get('/:id/sharing', async (c) => {
   if (!drawing || (user && drawing.user_id !== user.id)) return c.json({ error: 'Forbidden' }, 403);
 
   const permissions = await c.env.DB.prepare(`
-    SELECT dp.id, dp.user_id, dp.permission, u.email, u.username
+    SELECT dp.id, dp.user_id as granteeUserId, dp.permission, u.email, u.username as name
     FROM drawing_permissions dp
     JOIN users u ON dp.user_id = u.id
     WHERE dp.drawing_id = ?
   `).bind(id).all();
 
-  const linkShares = await c.env.DB.prepare('SELECT id, permission, expires_at, revoked_at, created_at FROM drawing_link_shares WHERE drawing_id = ?').bind(id).all();
+  const linkShares = await c.env.DB.prepare('SELECT id, permission, expires_at as expiresAt, revoked_at as revokedAt, created_at as createdAt FROM drawing_link_shares WHERE drawing_id = ?').bind(id).all();
 
   return c.json({ permissions: permissions.results, linkShares: linkShares.results });
 });
@@ -268,30 +385,32 @@ app.get('/:id/sharing', async (c) => {
 // Sharing: GET /:id/share-resolve
 app.get('/:id/share-resolve', async (c) => {
   const q = c.req.query('q');
-  if (!q) return c.json([]);
+  if (!q) return c.json({ users: [] });
   const searchPattern = `%${q}%`;
   const { results } = await c.env.DB.prepare(
-    'SELECT id, username, email FROM users WHERE email LIKE ? OR username LIKE ? LIMIT 10'
+    'SELECT id, username as name, email FROM users WHERE email LIKE ? OR username LIKE ? LIMIT 10'
   ).bind(searchPattern, searchPattern).all();
-  return c.json(results);
+  return c.json({ users: results });
 });
 
 // Sharing: POST /:id/permissions
 app.post('/:id/permissions', async (c) => {
   const user = c.get('user');
   const id = c.req.param('id');
-  const { userId, permission } = await c.req.json();
+  const { granteeUserId, userId, permission } = await c.req.json();
+  const targetUserId = granteeUserId || userId;
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
   const drawing = await c.env.DB.prepare('SELECT user_id FROM drawings WHERE id = ?').bind(id).first();
   if (!drawing || drawing.user_id !== user.id) return c.json({ error: 'Forbidden' }, 403);
 
   const now = new Date().toISOString();
+  const permId = crypto.randomUUID();
   await c.env.DB.prepare(`
     INSERT INTO drawing_permissions (id, drawing_id, user_id, permission, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(drawing_id, user_id) DO UPDATE SET permission = excluded.permission, updated_at = excluded.updated_at
-  `).bind(crypto.randomUUID(), id, userId, permission, now, now).run();
+  `).bind(permId, id, targetUserId, permission, now, now).run();
 
   return c.json({ success: true });
 });
@@ -333,7 +452,7 @@ app.post('/:id/link-shares', async (c) => {
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).bind(shareId, id, tokenHash, permission, passphraseHash, expiresAt || null, now).run();
 
-  return c.json({ id: shareId, token: rawToken, permission });
+  return c.json({ share: { id: shareId, token: rawToken, permission, expiresAt: expiresAt || null, revokedAt: null, createdAt: now, updatedAt: now, lastUsedAt: null } });
 });
 
 // Sharing: DELETE /:id/link-shares/:shareId

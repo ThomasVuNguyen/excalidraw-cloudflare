@@ -5,13 +5,20 @@ const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 
 app.get('/', async (c) => {
   const user = c.get('user');
-  if (!user) return c.json({ error: 'Unauthorized' }, 401);
+  if (!user) return c.json([]);
 
   const { results } = await c.env.DB.prepare(
     'SELECT * FROM collections WHERE user_id = ? ORDER BY created_at DESC'
   ).bind(user.id).all();
 
-  return c.json(results);
+  const collections = results.map(col => ({
+    id: col.id,
+    name: col.name,
+    createdAt: new Date(col.created_at as string).getTime(),
+    updatedAt: new Date(col.updated_at as string).getTime(),
+  }));
+
+  return c.json(collections);
 });
 
 app.post('/', async (c) => {
@@ -28,11 +35,12 @@ app.post('/', async (c) => {
     'INSERT INTO collections (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
   ).bind(id, user.id, name, now, now).run();
 
-  const newcollections = await c.env.DB.prepare(
-    'SELECT * FROM collections WHERE id = ?'
-  ).bind(id).first();
-
-  return c.json(newcollections, 201);
+  return c.json({
+    id,
+    name,
+    createdAt: Date.now(),
+    updatedAt: Date.now(),
+  }, 201);
 });
 
 app.put('/:id', async (c) => {
