@@ -66,6 +66,10 @@ app.use("*", async (c, next) => {
   return corsHandler(c, next);
 });
 
+// ─── Authentication Middleware ───────────────────────────────────────────────
+// Identifies authenticated user from JWT cookie or Authorization header
+app.use("*", authMiddleware);
+
 // ─── Health Check & CSRF (before auth & onboarding) ──────────────────────────
 
 app.get("/health", (c) => c.json({ status: "ok" }));
@@ -107,11 +111,10 @@ const handleWsUpgrade = async (c: any) => {
 app.get("/ws/drawing/:id", handleWsUpgrade);
 app.get("/api/ws/drawing/:id", handleWsUpgrade);
 
-// ─── Onboarding Gate, CSRF Protection, and Auth Middleware ─────────────────
+// ─── Onboarding Gate and CSRF Protection ────────────────────────────────────
 
 app.use("*", onboardingGate);
 app.use("*", csrfMiddleware);
-app.use("*", authMiddleware);
 
 // ─── Application API Routes ─────────────────────────────────────────────────
 

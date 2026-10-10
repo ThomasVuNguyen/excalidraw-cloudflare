@@ -1,5 +1,6 @@
 import { Context, Next } from 'hono';
 import { jwtVerify } from 'jose';
+import { getCookie } from 'hono/cookie';
 import type { Env, AppVariables, AuthUser } from '../types';
 
 function getToken(c: Context<{ Bindings: Env; Variables: AppVariables }>): string | null {
@@ -8,13 +9,9 @@ function getToken(c: Context<{ Bindings: Env; Variables: AppVariables }>): strin
     return authHeader.substring(7);
   }
   
-  const cookieHeader = c.req.header('Cookie');
-  if (cookieHeader) {
-    const cookies = cookieHeader.split(';').map(ck => ck.trim());
-    const tokenCookie = cookies.find(ck => ck.startsWith('excalidash-access-token='));
-    if (tokenCookie) {
-      return tokenCookie.split('=')[1];
-    }
+  const token = getCookie(c, 'excalidash-access-token');
+  if (token) {
+    return token;
   }
   
   return null;
@@ -68,7 +65,14 @@ export const requireAuth = async (
 
   if (user.mustResetPassword) {
     const path = new URL(c.req.url).pathname;
-    const allowedPaths = ['/api/auth/me', '/api/auth/change-password', '/api/auth/logout'];
+    const allowedPaths = [
+      '/api/auth/me',
+      '/api/auth/change-password',
+      '/api/auth/logout',
+      '/auth/me',
+      '/auth/change-password',
+      '/auth/logout',
+    ];
     if (!allowedPaths.includes(path)) {
       return c.json({ error: 'Password reset required', code: 'PASSWORD_RESET_REQUIRED' }, 403);
     }

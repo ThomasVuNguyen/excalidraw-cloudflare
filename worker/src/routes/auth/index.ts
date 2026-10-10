@@ -1,4 +1,5 @@
 import { Hono } from 'hono';
+import { setCookie, deleteCookie, getCookie } from 'hono/cookie';
 import { 
   hashPassword, 
   verifyPassword, 
@@ -14,19 +15,35 @@ const authRouter = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 function setCookies(c: any, accessToken: string, refreshToken: string) {
   const host = c.req.header('host') || '';
   const isLocalhost = host.startsWith('localhost') || host.startsWith('127.0.0.1');
-  const secure = !isLocalhost ? '; Secure' : '';
   
-  c.header('Set-Cookie', `excalidash-access-token=${accessToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=900${secure}`, { append: true });
-  c.header('Set-Cookie', `excalidash-refresh-token=${refreshToken}; HttpOnly; SameSite=Lax; Path=/; Max-Age=604800${secure}`, { append: true });
+  setCookie(c, 'excalidash-access-token', accessToken, {
+    httpOnly: true,
+    sameSite: 'Lax',
+    path: '/',
+    maxAge: 900,
+    secure: !isLocalhost,
+  });
+  setCookie(c, 'excalidash-refresh-token', refreshToken, {
+    httpOnly: true,
+    sameSite: 'Lax',
+    path: '/',
+    maxAge: 604800,
+    secure: !isLocalhost,
+  });
 }
 
 function clearCookies(c: any) {
   const host = c.req.header('host') || '';
   const isLocalhost = host.startsWith('localhost') || host.startsWith('127.0.0.1');
-  const secure = !isLocalhost ? '; Secure' : '';
   
-  c.header('Set-Cookie', `excalidash-access-token=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`, { append: true });
-  c.header('Set-Cookie', `excalidash-refresh-token=; HttpOnly; SameSite=Lax; Path=/; Max-Age=0${secure}`, { append: true });
+  deleteCookie(c, 'excalidash-access-token', {
+    path: '/',
+    secure: !isLocalhost,
+  });
+  deleteCookie(c, 'excalidash-refresh-token', {
+    path: '/',
+    secure: !isLocalhost,
+  });
 }
 
 authRouter.post('/login', async (c) => {
@@ -143,14 +160,9 @@ authRouter.post('/register', async (c) => {
 });
 
 authRouter.post('/refresh', async (c) => {
-  const cookieHeader = c.req.header('Cookie');
-  if (!cookieHeader) return c.json({ error: 'Unauthorized' }, 401);
+  const refreshToken = getCookie(c, 'excalidash-refresh-token');
+  if (!refreshToken) return c.json({ error: 'Unauthorized' }, 401);
   
-  const cookies = cookieHeader.split(';').map(co => co.trim());
-  const tokenCookie = cookies.find(co => co.startsWith('excalidash-refresh-token='));
-  if (!tokenCookie) return c.json({ error: 'Unauthorized' }, 401);
-  
-  const refreshToken = tokenCookie.split('=')[1];
   const hashedRefresh = await hashToken(refreshToken);
   
   const tokenRecord = await c.env.DB.prepare(
@@ -181,15 +193,10 @@ authRouter.post('/refresh', async (c) => {
 });
 
 authRouter.post('/logout', requireAuth, async (c) => {
-  const cookieHeader = c.req.header('Cookie');
-  if (cookieHeader) {
-    const cookies = cookieHeader.split(';').map(co => co.trim());
-    const tokenCookie = cookies.find(co => co.startsWith('excalidash-refresh-token='));
-    if (tokenCookie) {
-      const refreshToken = tokenCookie.split('=')[1];
-      const hashedRefresh = await hashToken(refreshToken);
-      await c.env.DB.prepare('DELETE FROM refresh_tokens WHERE token_hash = ?').bind(hashedRefresh).run();
-    }
+  const refreshToken = getCookie(c, 'excalidash-refresh-token');
+  if (refreshToken) {
+    const hashedRefresh = await hashToken(refreshToken);
+    await c.env.DB.prepare('DELETE FROM refresh_tokens WHERE token_hash = ?').bind(hashedRefresh).run();
   }
   clearCookies(c);
   return c.json({ success: true });
