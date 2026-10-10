@@ -14,7 +14,7 @@ import { getInitialLangCode, LanguageSelector } from '../components/LanguageSele
 import debounce from 'lodash/debounce';
 import throttle from 'lodash/throttle';
 import { Toaster, toast } from 'sonner';
-import { io, Socket } from 'socket.io-client';
+import { connectToDrawingRoom, ExcalidashSocket } from '../utils/websocket';
 import type { UserIdentity } from '../utils/identity';
 import { useAuth } from '../context/AuthContext';
 import { exportFromEditor } from '../utils/exportUtils';
@@ -235,7 +235,7 @@ export const Editor: React.FC = () => {
 
   const [peers, setPeers] = useState<Peer[]>([]);
   const [isReady, setIsReady] = useState(false);
-  const socketRef = useRef<Socket | null>(null);
+  const socketRef = useRef<ExcalidashSocket | null>(null);
   const lastCursorEmit = useRef<number>(0);
   const elementVersionMap = useRef<Map<string, ElementVersionInfo>>(new Map());
   const isBootstrappingScene = useRef(true);
@@ -475,15 +475,7 @@ export const Editor: React.FC = () => {
   useEffect(() => {
     if (!id || !isReady) return;
 
-    const socketUrl = import.meta.env.VITE_API_URL === '/api'
-      ? window.location.origin
-      : (import.meta.env.VITE_API_URL || import.meta.env.VITE_DEV_BACKEND_URL || 'http://localhost:8000');
-
-    const socket = io(socketUrl, {
-      path: '/socket.io',
-      transports: ['websocket', 'polling'],
-      withCredentials: true,
-    });
+    const socket = connectToDrawingRoom(id);
     socketRef.current = socket;
 
     if (import.meta.env.DEV) {

@@ -20,7 +20,7 @@ const buildLabel = process.env.VITE_APP_BUILD_LABEL?.trim() || "local developmen
 
 export default defineConfig(({ command }) => {
   const nodeEnv = process.env.NODE_ENV || (command === "build" ? "production" : "development");
-  const devBackendTarget = process.env.VITE_DEV_BACKEND_URL?.trim() || "http://localhost:8000";
+  const devBackendTarget = process.env.VITE_DEV_BACKEND_URL?.trim() || "http://localhost:8787";
   const processEnvDefines = {
     'process.env.IS_PREACT': JSON.stringify("false"),
     'process.env.NODE_ENV': JSON.stringify(nodeEnv),
@@ -46,7 +46,7 @@ export default defineConfig(({ command }) => {
           changeOrigin: true,
           rewrite: (path) => path.replace(/^\/api/, ""),
         },
-        "/socket.io": {
+        "/ws": {
           target: devBackendTarget,
           changeOrigin: true,
           ws: true,

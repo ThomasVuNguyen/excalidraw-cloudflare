@@ -1,0 +1,58 @@
+{
+  "name": "excalidash-worker",
+  "compatibility_date": "2026-10-01",
+  "compatibility_flags": ["nodejs_compat"],
+  "main": "src/index.ts",
+
+  "d1_databases": [
+    {
+      "binding": "DB",
+      "database_name": "excalidash-db",
+      "database_id": "e263c9e9-0d02-41e9-9113-2218c87ba36e",
+      "migrations_dir": "migrations"
+    }
+  ],
+
+  "r2_buckets": [
+    {
+      "binding": "STORAGE",
+      "bucket_name": "excalidash-storage"
+    }
+  ],
+
+  "kv_namespaces": [
+    {
+      "binding": "CACHE",
+      "id": "4307512814534b69a9ef37a04522f4ca"
+    }
+  ],
+
+  "durable_objects": {
+    "bindings": [
+      {
+        "name": "DRAWING_ROOM",
+        "class_name": "DrawingRoom"
+      }
+    ]
+  },
+
+  "migrations": [
+    {
+      "tag": "v1",
+      "new_classes": ["DrawingRoom"]
+    }
+  ],
+
+  "vars": {
+    "AUTH_MODE": "local",
+    "FRONTEND_URL": "https://draw.beenex.org"
+  },
+
+  "placement": {
+    "mode": "smart"
+  },
+
+  "limits": {
+    "cpu_ms": 30000
+  }
+}
