@@ -45,8 +45,19 @@
 
   "vars": {
     "AUTH_MODE": "local",
-    "FRONTEND_URL": "https://draw.beenex.org"
+    "FRONTEND_URL": "https://draw.beenex.company"
   },
+
+  "routes": [
+    {
+      "pattern": "api.draw.beenex.company",
+      "custom_domain": true
+    }
+  ],
+
+  "workers_dev": true,
+
+
 
   "placement": {
     "mode": "smart"
