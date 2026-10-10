@@ -22,7 +22,7 @@ app.get('/', async (c) => {
   const sortField = c.req.query('sortField') || 'updatedAt';
   const sortDirection = c.req.query('sortDirection') === 'asc' ? 'ASC' : 'DESC';
 
-  let query = 'SELECT * FROM Drawing WHERE user_id = ?';
+  let query = 'SELECT * FROM drawings WHERE user_id = ?';
   const params: any[] = [user.id];
 
   if (collectionId) {
@@ -48,9 +48,9 @@ app.get('/shared', async (c) => {
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
   const { results } = await c.env.DB.prepare(`
-    SELECT d.*, dp.permission
-    FROM Drawing d
-    JOIN DrawingPermission dp ON d.id = dp.drawing_id
+    SELECT d.*, dp.permission AS access_level
+    FROM drawings d
+    JOIN drawing_permissions dp ON d.id = dp.drawing_id
     WHERE dp.user_id = ?
   `).bind(user.id).all();
 
@@ -63,7 +63,7 @@ app.get('/:id', async (c) => {
   const user = c.get('user');
   const shareToken = c.req.query('shareToken');
 
-  const drawing = await c.env.DB.prepare('SELECT * FROM Drawing WHERE id = ?').bind(id).first();
+  const drawing = await c.env.DB.prepare('SELECT * FROM drawings WHERE id = ?').bind(id).first();
   if (!drawing) return c.json({ error: 'Not found' }, 404);
 
   let hasAccess = false;
@@ -76,7 +76,7 @@ app.get('/:id', async (c) => {
 
   if (!hasAccess && user) {
     const perm = await c.env.DB.prepare(
-      'SELECT permission FROM DrawingPermission WHERE drawing_id = ? AND user_id = ?'
+      'SELECT permission FROM drawing_permissions WHERE drawing_id = ? AND user_id = ?'
     ).bind(id, user.id).first();
     if (perm) {
       hasAccess = true;
@@ -87,7 +87,7 @@ app.get('/:id', async (c) => {
   if (!hasAccess && shareToken) {
     const hashedToken = await sha256(shareToken);
     const linkShare = await c.env.DB.prepare(
-      'SELECT permission FROM DrawingLinkShare WHERE drawing_id = ? AND token_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)'
+      'SELECT permission FROM drawing_link_shares WHERE drawing_id = ? AND token_hash = ? AND revoked_at IS NULL AND (expires_at IS NULL OR expires_at > ?)'
     ).bind(id, hashedToken, new Date().toISOString()).first();
     if (linkShare) {
       hasAccess = true;
@@ -110,7 +110,7 @@ app.post('/', async (c) => {
   const now = new Date().toISOString();
 
   await c.env.DB.prepare(`
-    INSERT INTO Drawing (id, user_id, collection_id, name, elements, app_state, files, preview, version, created_at, updated_at)
+    INSERT INTO drawings (id, user_id, collection_id, name, elements, app_state, files, preview, version, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
     id, user.id, body.collectionId || null, body.name || 'Untitled',
@@ -119,7 +119,7 @@ app.post('/', async (c) => {
     1, now, now
   ).run();
 
-  const newDrawing = await c.env.DB.prepare('SELECT * FROM Drawing WHERE id = ?').bind(id).first();
+  const newDrawing = await c.env.DB.prepare('SELECT * FROM drawings WHERE id = ?').bind(id).first();
   return c.json(newDrawing, 201);
 });
 
@@ -130,13 +130,13 @@ app.put('/:id', async (c) => {
   const body = await c.req.json();
   const now = new Date().toISOString();
 
-  const current = await c.env.DB.prepare('SELECT * FROM Drawing WHERE id = ?').bind(id).first();
+  const current = await c.env.DB.prepare('SELECT * FROM drawings WHERE id = ?').bind(id).first();
   if (!current) return c.json({ error: 'Not found' }, 404);
 
   let hasEdit = false;
   if (user && current.user_id === user.id) hasEdit = true;
   else if (user) {
-    const perm = await c.env.DB.prepare('SELECT permission FROM DrawingPermission WHERE drawing_id = ? AND user_id = ?').bind(id, user.id).first();
+    const perm = await c.env.DB.prepare('SELECT permission FROM drawing_permissions WHERE drawing_id = ? AND user_id = ?').bind(id, user.id).first();
     if (perm && perm.permission === 'edit') hasEdit = true;
   }
   
@@ -150,16 +150,16 @@ app.put('/:id', async (c) => {
 
   // Create snapshot
   await c.env.DB.prepare(`
-    INSERT INTO DrawingSnapshot (id, drawing_id, version, elements, app_state, files, created_at)
+    INSERT INTO drawing_snapshots (id, drawing_id, version, elements, app_state, files, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).bind(
     crypto.randomUUID(), id, current.version,
-    current.elements, current.app_state, current.files, current.updated_at
+    current.elements as string, current.app_state as string, current.files as string, current.updated_at as string
   ).run();
 
   // Update drawing
   await c.env.DB.prepare(`
-    UPDATE Drawing
+    UPDATE drawings
     SET elements = ?, app_state = ?, files = ?, preview = ?, name = COALESCE(?, name), version = version + 1, updated_at = ?
     WHERE id = ? AND version = ?
   `).bind(
@@ -175,7 +175,7 @@ app.delete('/:id', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
   const id = c.req.param('id');
-  const result = await c.env.DB.prepare('DELETE FROM Drawing WHERE id = ? AND user_id = ?').bind(id, user.id).run();
+  const result = await c.env.DB.prepare('DELETE FROM drawings WHERE id = ? AND user_id = ?').bind(id, user.id).run();
   if (!result.success || result.meta.changes === 0) return c.json({ error: 'Not found or not owner' }, 404);
   return c.json({ success: true });
 });
@@ -185,35 +185,36 @@ app.post('/:id/duplicate', async (c) => {
   const user = c.get('user');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
   const id = c.req.param('id');
-  const original = await c.env.DB.prepare('SELECT * FROM Drawing WHERE id = ?').bind(id).first();
+  const original = await c.env.DB.prepare('SELECT * FROM drawings WHERE id = ?').bind(id).first();
   if (!original) return c.json({ error: 'Not found' }, 404);
 
   const newId = crypto.randomUUID();
   const now = new Date().toISOString();
+  const copyName = `${original.name} (Copy)`;
   await c.env.DB.prepare(`
-    INSERT INTO Drawing (id, user_id, collection_id, name, elements, app_state, files, preview, version, created_at, updated_at)
+    INSERT INTO drawings (id, user_id, collection_id, name, elements, app_state, files, preview, version, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?, ?, ?, ?, ?, ?)
   `).bind(
-    newId, user.id, original.collection_id, \`\${original.name} (Copy)\`,
+    newId, user.id, original.collection_id, copyName,
     original.elements, original.app_state, original.files, original.preview,
     1, now, now
   ).run();
 
-  const duplicated = await c.env.DB.prepare('SELECT * FROM Drawing WHERE id = ?').bind(newId).first();
+  const duplicated = await c.env.DB.prepare('SELECT * FROM drawings WHERE id = ?').bind(newId).first();
   return c.json(duplicated, 201);
 });
 
 // History: GET /:id/history
 app.get('/:id/history', async (c) => {
   const id = c.req.param('id');
-  const { results } = await c.env.DB.prepare('SELECT id, version, created_at FROM DrawingSnapshot WHERE drawing_id = ? ORDER BY version DESC').bind(id).all();
+  const { results } = await c.env.DB.prepare('SELECT id, version, created_at FROM drawing_snapshots WHERE drawing_id = ? ORDER BY version DESC').bind(id).all();
   return c.json(results);
 });
 
 // History: GET /:id/history/:snapshotId
 app.get('/:id/history/:snapshotId', async (c) => {
   const { id, snapshotId } = c.req.param();
-  const snapshot = await c.env.DB.prepare('SELECT * FROM DrawingSnapshot WHERE id = ? AND drawing_id = ?').bind(snapshotId, id).first();
+  const snapshot = await c.env.DB.prepare('SELECT * FROM drawing_snapshots WHERE id = ? AND drawing_id = ?').bind(snapshotId, id).first();
   if (!snapshot) return c.json({ error: 'Not found' }, 404);
   return c.json(snapshot);
 });
@@ -224,21 +225,21 @@ app.post('/:id/history/:snapshotId/restore', async (c) => {
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
   const { id, snapshotId } = c.req.param();
 
-  const current = await c.env.DB.prepare('SELECT * FROM Drawing WHERE id = ? AND user_id = ?').bind(id, user.id).first();
+  const current = await c.env.DB.prepare('SELECT * FROM drawings WHERE id = ? AND user_id = ?').bind(id, user.id).first();
   if (!current) return c.json({ error: 'Not found or not owner' }, 404);
 
-  const snapshot = await c.env.DB.prepare('SELECT * FROM DrawingSnapshot WHERE id = ? AND drawing_id = ?').bind(snapshotId, id).first();
+  const snapshot = await c.env.DB.prepare('SELECT * FROM drawing_snapshots WHERE id = ? AND drawing_id = ?').bind(snapshotId, id).first();
   if (!snapshot) return c.json({ error: 'Snapshot not found' }, 404);
 
   const now = new Date().toISOString();
 
   await c.env.DB.prepare(`
-    INSERT INTO DrawingSnapshot (id, drawing_id, version, elements, app_state, files, created_at)
+    INSERT INTO drawing_snapshots (id, drawing_id, version, elements, app_state, files, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).bind(crypto.randomUUID(), id, current.version, current.elements, current.app_state, current.files, now).run();
 
   await c.env.DB.prepare(`
-    UPDATE Drawing SET elements = ?, app_state = ?, files = ?, version = version + 1, updated_at = ?
+    UPDATE drawings SET elements = ?, app_state = ?, files = ?, version = version + 1, updated_at = ?
     WHERE id = ?
   `).bind(snapshot.elements, snapshot.app_state, snapshot.files, now, id).run();
 
@@ -249,17 +250,17 @@ app.post('/:id/history/:snapshotId/restore', async (c) => {
 app.get('/:id/sharing', async (c) => {
   const user = c.get('user');
   const id = c.req.param('id');
-  const drawing = await c.env.DB.prepare('SELECT user_id FROM Drawing WHERE id = ?').bind(id).first();
+  const drawing = await c.env.DB.prepare('SELECT user_id FROM drawings WHERE id = ?').bind(id).first();
   if (!drawing || (user && drawing.user_id !== user.id)) return c.json({ error: 'Forbidden' }, 403);
 
   const permissions = await c.env.DB.prepare(`
     SELECT dp.id, dp.user_id, dp.permission, u.email, u.username
-    FROM DrawingPermission dp
-    JOIN User u ON dp.user_id = u.id
+    FROM drawing_permissions dp
+    JOIN users u ON dp.user_id = u.id
     WHERE dp.drawing_id = ?
   `).bind(id).all();
 
-  const linkShares = await c.env.DB.prepare('SELECT id, permission, expires_at, revoked_at, created_at FROM DrawingLinkShare WHERE drawing_id = ?').bind(id).all();
+  const linkShares = await c.env.DB.prepare('SELECT id, permission, expires_at, revoked_at, created_at FROM drawing_link_shares WHERE drawing_id = ?').bind(id).all();
 
   return c.json({ permissions: permissions.results, linkShares: linkShares.results });
 });
@@ -268,9 +269,10 @@ app.get('/:id/sharing', async (c) => {
 app.get('/:id/share-resolve', async (c) => {
   const q = c.req.query('q');
   if (!q) return c.json([]);
-  const { results } = await c.env.DB.prepare(`
-    SELECT id, username, email FROM User WHERE email LIKE ? OR username LIKE ? LIMIT 10
-  `).bind(\`%\${q}%\`, \`%\${q}%\`).all();
+  const searchPattern = `%${q}%`;
+  const { results } = await c.env.DB.prepare(
+    'SELECT id, username, email FROM users WHERE email LIKE ? OR username LIKE ? LIMIT 10'
+  ).bind(searchPattern, searchPattern).all();
   return c.json(results);
 });
 
@@ -281,12 +283,12 @@ app.post('/:id/permissions', async (c) => {
   const { userId, permission } = await c.req.json();
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
-  const drawing = await c.env.DB.prepare('SELECT user_id FROM Drawing WHERE id = ?').bind(id).first();
+  const drawing = await c.env.DB.prepare('SELECT user_id FROM drawings WHERE id = ?').bind(id).first();
   if (!drawing || drawing.user_id !== user.id) return c.json({ error: 'Forbidden' }, 403);
 
   const now = new Date().toISOString();
   await c.env.DB.prepare(`
-    INSERT INTO DrawingPermission (id, drawing_id, user_id, permission, created_at, updated_at)
+    INSERT INTO drawing_permissions (id, drawing_id, user_id, permission, created_at, updated_at)
     VALUES (?, ?, ?, ?, ?, ?)
     ON CONFLICT(drawing_id, user_id) DO UPDATE SET permission = excluded.permission, updated_at = excluded.updated_at
   `).bind(crypto.randomUUID(), id, userId, permission, now, now).run();
@@ -299,10 +301,10 @@ app.delete('/:id/permissions/:permId', async (c) => {
   const user = c.get('user');
   const { id, permId } = c.req.param();
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
-  const drawing = await c.env.DB.prepare('SELECT user_id FROM Drawing WHERE id = ?').bind(id).first();
+  const drawing = await c.env.DB.prepare('SELECT user_id FROM drawings WHERE id = ?').bind(id).first();
   if (!drawing || drawing.user_id !== user.id) return c.json({ error: 'Forbidden' }, 403);
 
-  await c.env.DB.prepare('DELETE FROM DrawingPermission WHERE id = ? AND drawing_id = ?').bind(permId, id).run();
+  await c.env.DB.prepare('DELETE FROM drawing_permissions WHERE id = ? AND drawing_id = ?').bind(permId, id).run();
   return c.json({ success: true });
 });
 
@@ -311,7 +313,7 @@ app.post('/:id/link-shares', async (c) => {
   const user = c.get('user');
   const id = c.req.param('id');
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
-  const drawing = await c.env.DB.prepare('SELECT user_id FROM Drawing WHERE id = ?').bind(id).first();
+  const drawing = await c.env.DB.prepare('SELECT user_id FROM drawings WHERE id = ?').bind(id).first();
   if (!drawing || drawing.user_id !== user.id) return c.json({ error: 'Forbidden' }, 403);
 
   const { permission, expiresAt, passphrase } = await c.req.json();
@@ -327,7 +329,7 @@ app.post('/:id/link-shares', async (c) => {
   const now = new Date().toISOString();
 
   await c.env.DB.prepare(`
-    INSERT INTO DrawingLinkShare (id, drawing_id, token_hash, permission, passphrase_hash, expires_at, created_at)
+    INSERT INTO drawing_link_shares (id, drawing_id, token_hash, permission, passphrase_hash, expires_at, created_at)
     VALUES (?, ?, ?, ?, ?, ?, ?)
   `).bind(shareId, id, tokenHash, permission, passphraseHash, expiresAt || null, now).run();
 
@@ -339,10 +341,10 @@ app.delete('/:id/link-shares/:shareId', async (c) => {
   const user = c.get('user');
   const { id, shareId } = c.req.param();
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
-  const drawing = await c.env.DB.prepare('SELECT user_id FROM Drawing WHERE id = ?').bind(id).first();
+  const drawing = await c.env.DB.prepare('SELECT user_id FROM drawings WHERE id = ?').bind(id).first();
   if (!drawing || drawing.user_id !== user.id) return c.json({ error: 'Forbidden' }, 403);
 
-  await c.env.DB.prepare('UPDATE DrawingLinkShare SET revoked_at = ? WHERE id = ? AND drawing_id = ?')
+  await c.env.DB.prepare('UPDATE drawing_link_shares SET revoked_at = ? WHERE id = ? AND drawing_id = ?')
     .bind(new Date().toISOString(), shareId, id).run();
 
   return c.json({ success: true });

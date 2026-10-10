@@ -8,7 +8,7 @@ app.get('/', async (c) => {
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
   const { results } = await c.env.DB.prepare(
-    'SELECT * FROM Collection WHERE user_id = ? ORDER BY created_at DESC'
+    'SELECT * FROM collections WHERE user_id = ? ORDER BY created_at DESC'
   ).bind(user.id).all();
 
   return c.json(results);
@@ -25,14 +25,14 @@ app.post('/', async (c) => {
   const now = new Date().toISOString();
 
   await c.env.DB.prepare(
-    'INSERT INTO Collection (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+    'INSERT INTO collections (id, user_id, name, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
   ).bind(id, user.id, name, now, now).run();
 
-  const newCollection = await c.env.DB.prepare(
-    'SELECT * FROM Collection WHERE id = ?'
+  const newcollections = await c.env.DB.prepare(
+    'SELECT * FROM collections WHERE id = ?'
   ).bind(id).first();
 
-  return c.json(newCollection, 201);
+  return c.json(newcollections, 201);
 });
 
 app.put('/:id', async (c) => {
@@ -44,11 +44,11 @@ app.put('/:id', async (c) => {
   const now = new Date().toISOString();
 
   const result = await c.env.DB.prepare(
-    'UPDATE Collection SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?'
+    'UPDATE collections SET name = ?, updated_at = ? WHERE id = ? AND user_id = ?'
   ).bind(name, now, id, user.id).run();
 
   if (!result.success || result.meta.changes === 0) {
-    return c.json({ error: 'Collection not found or update failed' }, 404);
+    return c.json({ error: 'collections not found or update failed' }, 404);
   }
 
   return c.json({ success: true });
@@ -61,15 +61,15 @@ app.delete('/:id', async (c) => {
   const id = c.req.param('id');
 
   await c.env.DB.prepare(
-    'UPDATE Drawing SET collection_id = NULL WHERE collection_id = ? AND user_id = ?'
+    'UPDATE drawings SET collection_id = NULL WHERE collection_id = ? AND user_id = ?'
   ).bind(id, user.id).run();
 
   const result = await c.env.DB.prepare(
-    'DELETE FROM Collection WHERE id = ? AND user_id = ?'
+    'DELETE FROM collections WHERE id = ? AND user_id = ?'
   ).bind(id, user.id).run();
 
   if (!result.success || result.meta.changes === 0) {
-    return c.json({ error: 'Collection not found' }, 404);
+    return c.json({ error: 'collections not found' }, 404);
   }
 
   return c.json({ success: true });

@@ -39,7 +39,7 @@
   "migrations": [
     {
       "tag": "v1",
-      "new_classes": ["DrawingRoom"]
+      "new_sqlite_classes": ["DrawingRoom"]
     }
   ],
 

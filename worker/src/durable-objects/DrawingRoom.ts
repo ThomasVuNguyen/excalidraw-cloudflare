@@ -72,7 +72,7 @@ export class DrawingRoom extends DurableObject<Env> {
   /**
    * Handle incoming WebSocket messages (Hibernation API handler)
    */
-  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): void {
+  async webSocketMessage(ws: WebSocket, message: string | ArrayBuffer): Promise<void> {
     try {
       const data = JSON.parse(
         typeof message === "string" ? message : new TextDecoder().decode(message)
@@ -107,7 +107,7 @@ export class DrawingRoom extends DurableObject<Env> {
   /**
    * Handle WebSocket close (Hibernation API handler)
    */
-  async webSocketClose(ws: WebSocket, code: number, _reason: string, _wasClean: boolean): void {
+  async webSocketClose(ws: WebSocket, code: number, _reason: string, _wasClean: boolean): Promise<void> {
     const attachment = ws.deserializeAttachment() as SocketAttachment | null;
     if (attachment?.userId) {
       // Broadcast updated presence to remaining connections
@@ -119,7 +119,7 @@ export class DrawingRoom extends DurableObject<Env> {
   /**
    * Handle WebSocket errors
    */
-  async webSocketError(ws: WebSocket, error: unknown): void {
+  async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
     console.error("WebSocket error:", error);
     const attachment = ws.deserializeAttachment() as SocketAttachment | null;
     if (attachment?.userId) {

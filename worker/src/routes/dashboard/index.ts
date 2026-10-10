@@ -10,4 +10,4 @@ app.route('/drawings', drawingsRouter);
 app.route('/collections', collectionsRouter);
 app.route('/library', libraryRouter);
 
-export default app;
+export { app as dashboardRoutes };

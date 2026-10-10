@@ -6,28 +6,26 @@ const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
 app.get('/update', async (c) => {
   const CACHE_KEY = 'system:update_check';
   
-  if (c.env.KV) {
-    try {
-      const cached = await c.env.KV.get(CACHE_KEY, 'json');
-      if (cached) return c.json(cached);
-    } catch (e) {
-      // Ignore cache errors
-    }
+  try {
+    const cached = await c.env.CACHE.get(CACHE_KEY, 'json');
+    if (cached) return c.json(cached);
+  } catch {
+    // Ignore cache errors
   }
 
-  const currentVersion = c.env.APP_VERSION || '1.0.0';
+  const currentVersion = '0.5.0';
   const defaultResponse = {
     currentVersion,
     channel: 'stable',
     outboundEnabled: true,
     latestVersion: currentVersion,
-    latestUrl: 'https://github.com/excalidraw/excalidraw/releases',
+    latestUrl: 'https://github.com/ThomasVuNguyen/excalidraw-cloudflare/releases',
     publishedAt: new Date().toISOString(),
     isUpdateAvailable: false
   };
 
   try {
-    const res = await fetch('https://api.github.com/repos/excalidraw/excalidraw/releases/latest', {
+    const res = await fetch('https://api.github.com/repos/ThomasVuNguyen/excalidraw-cloudflare/releases/latest', {
       headers: { 'User-Agent': 'ExcaliDash-Worker' }
     });
     
@@ -45,10 +43,7 @@ app.get('/update', async (c) => {
         isUpdateAvailable: versionStr !== currentVersion && versionStr !== `v${currentVersion}`
       };
 
-      if (c.env.KV) {
-        await c.env.KV.put(CACHE_KEY, JSON.stringify(updateData), { expirationTtl: 3600 });
-      }
-
+      await c.env.CACHE.put(CACHE_KEY, JSON.stringify(updateData), { expirationTtl: 3600 });
       return c.json(updateData);
     }
   } catch (err) {
@@ -58,4 +53,4 @@ app.get('/update', async (c) => {
   return c.json(defaultResponse);
 });
 
-export default app;
+export { app as systemRoutes };

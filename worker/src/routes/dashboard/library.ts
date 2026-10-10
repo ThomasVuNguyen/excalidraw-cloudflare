@@ -8,7 +8,7 @@ app.get('/', async (c) => {
   if (!user) return c.json({ error: 'Unauthorized' }, 401);
 
   const library = await c.env.DB.prepare(
-    'SELECT * FROM Library WHERE user_id = ?'
+    'SELECT * FROM libraries WHERE user_id = ?'
   ).bind(user.id).first();
 
   return c.json(library || { items: '[]' });
@@ -22,16 +22,16 @@ app.put('/', async (c) => {
   const now = new Date().toISOString();
   const itemsStr = JSON.stringify(items);
 
-  const existing = await c.env.DB.prepare('SELECT id FROM Library WHERE user_id = ?').bind(user.id).first();
+  const existing = await c.env.DB.prepare('SELECT id FROM libraries WHERE user_id = ?').bind(user.id).first();
   
   if (existing) {
     await c.env.DB.prepare(
-      'UPDATE Library SET items = ?, updated_at = ? WHERE user_id = ?'
+      'UPDATE libraries SET items = ?, updated_at = ? WHERE user_id = ?'
     ).bind(itemsStr, now, user.id).run();
   } else {
     const id = crypto.randomUUID();
     await c.env.DB.prepare(
-      'INSERT INTO Library (id, user_id, items, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
+      'INSERT INTO libraries (id, user_id, items, created_at, updated_at) VALUES (?, ?, ?, ?, ?)'
     ).bind(id, user.id, itemsStr, now, now).run();
   }
 

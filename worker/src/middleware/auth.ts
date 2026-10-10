@@ -10,8 +10,8 @@ function getToken(c: Context<{ Bindings: Env; Variables: AppVariables }>): strin
   
   const cookieHeader = c.req.header('Cookie');
   if (cookieHeader) {
-    const cookies = cookieHeader.split(';').map(c => c.trim());
-    const tokenCookie = cookies.find(c => c.startsWith('excalidash-access-token='));
+    const cookies = cookieHeader.split(';').map(ck => ck.trim());
+    const tokenCookie = cookies.find(ck => ck.startsWith('excalidash-access-token='));
     if (tokenCookie) {
       return tokenCookie.split('=')[1];
     }
@@ -42,8 +42,9 @@ export const authMiddleware = async (
         const authUser: AuthUser = {
           id: user.id as string,
           email: user.email as string,
-          name: user.name as string,
-          role: user.role as string,
+          username: (user.username as string) || null,
+          role: user.role as "USER" | "ADMIN",
+          isActive: !!user.is_active,
           mustResetPassword: !!user.must_reset_password,
         };
         c.set('user', authUser);

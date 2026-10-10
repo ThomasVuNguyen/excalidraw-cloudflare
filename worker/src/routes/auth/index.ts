@@ -47,8 +47,8 @@ authRouter.post('/login', async (c) => {
   const hashedRefresh = await hashToken(refreshToken);
   
   await c.env.DB.prepare(
-    'INSERT INTO refresh_tokens (token_hash, user_id, expires_at) VALUES (?, ?, datetime("now", "+7 days"))'
-  ).bind(hashedRefresh, user.id).run();
+    'INSERT INTO refresh_tokens (id, token_hash, user_id, expires_at) VALUES (?, ?, ?, datetime("now", "+7 days"))'
+  ).bind(crypto.randomUUID(), hashedRefresh, user.id).run();
 
   setCookies(c, accessToken, refreshToken);
   
@@ -56,19 +56,18 @@ authRouter.post('/login', async (c) => {
 });
 
 authRouter.post('/register', async (c) => {
-  const { email, password, name, setupCode } = await c.req.json();
+  const { email, password, username, setupCode } = await c.req.json();
   
   const usersCount = await c.env.DB.prepare('SELECT count(*) as count FROM users').first<{count: number}>();
   const isFirstUser = usersCount && usersCount.count === 0;
   
   if (!isFirstUser && !setupCode) {
-    // Only admins can invite, or setup code required (simplify to block open registration)
     return c.json({ error: 'Registration requires invitation or setup code' }, 403);
   }
   
   if (!isFirstUser && setupCode) {
-    const config = await c.env.DB.prepare("SELECT value FROM system_config WHERE key = 'setup_code'").first<{value: string}>();
-    if (!config || !timingSafeEqual(config.value, setupCode)) {
+    const config = await c.env.DB.prepare('SELECT bootstrap_setup_code_hash FROM system_config WHERE id = ?').bind('default').first();
+    if (!config || !config.bootstrap_setup_code_hash || !timingSafeEqual(config.bootstrap_setup_code_hash as string, setupCode)) {
       return c.json({ error: 'Invalid setup code' }, 403);
     }
   }
@@ -83,10 +82,17 @@ authRouter.post('/register', async (c) => {
   const role = isFirstUser ? 'ADMIN' : 'USER';
   
   await c.env.DB.prepare(
-    'INSERT INTO users (id, email, password_hash, name, role, is_active) VALUES (?, ?, ?, ?, ?, 1)'
-  ).bind(id, email, passwordHash, name, role).run();
+    'INSERT INTO users (id, email, password_hash, username, role, is_active) VALUES (?, ?, ?, ?, ?, 1)'
+  ).bind(id, email, passwordHash, username || null, role).run();
   
-  return c.json({ success: true });
+  // If first user, mark auth as enabled and onboarding complete
+  if (isFirstUser) {
+    await c.env.DB.prepare(
+      'UPDATE system_config SET auth_enabled = 1, updated_at = datetime("now") WHERE id = ?'
+    ).bind('default').run();
+  }
+  
+  return c.json({ success: true, role });
 });
 
 authRouter.post('/refresh', async (c) => {
@@ -101,7 +107,7 @@ authRouter.post('/refresh', async (c) => {
   const hashedRefresh = await hashToken(refreshToken);
   
   const tokenRecord = await c.env.DB.prepare(
-    'SELECT * FROM refresh_tokens WHERE token_hash = ? AND expires_at > datetime("now")'
+    'SELECT * FROM refresh_tokens WHERE token_hash = ? AND expires_at > datetime("now") AND revoked_at IS NULL'
   ).bind(hashedRefresh).first();
   
   if (!tokenRecord) {
@@ -119,8 +125,8 @@ authRouter.post('/refresh', async (c) => {
   
   await c.env.DB.prepare('DELETE FROM refresh_tokens WHERE token_hash = ?').bind(hashedRefresh).run();
   await c.env.DB.prepare(
-    'INSERT INTO refresh_tokens (token_hash, user_id, expires_at) VALUES (?, ?, datetime("now", "+7 days"))'
-  ).bind(newHashedRefresh, user.id).run();
+    'INSERT INTO refresh_tokens (id, token_hash, user_id, expires_at) VALUES (?, ?, ?, datetime("now", "+7 days"))'
+  ).bind(crypto.randomUUID(), newHashedRefresh, user.id).run();
   
   setCookies(c, tokens.accessToken, tokens.refreshToken);
   
@@ -149,43 +155,42 @@ authRouter.get('/me', requireAuth, async (c) => {
 
 authRouter.get('/status', async (c) => {
   const usersCount = await c.env.DB.prepare('SELECT count(*) as count FROM users').first<{count: number}>();
-  const authEnabled = await c.env.DB.prepare("SELECT value FROM system_config WHERE key = 'auth_enabled'").first<{value: string}>();
+  const config = await c.env.DB.prepare('SELECT * FROM system_config WHERE id = ?').bind('default').first();
   
   return c.json({
     authMode: c.env.AUTH_MODE,
-    authEnabled: authEnabled ? authEnabled.value === 'true' : null,
-    onboardingComplete: authEnabled !== null,
+    authEnabled: config ? Boolean(config.auth_enabled) : null,
+    onboardingComplete: config ? Boolean(config.auth_enabled) : false,
     isFirstUser: usersCount ? usersCount.count === 0 : true
   });
 });
 
 authRouter.post('/onboarding-choice', async (c) => {
   const { enabled } = await c.req.json();
-  const value = enabled ? 'true' : 'false';
   
   await c.env.DB.prepare(
-    "INSERT INTO system_config (key, value) VALUES ('auth_enabled', ?) ON CONFLICT(key) DO UPDATE SET value = ?"
-  ).bind(value, value).run();
+    'UPDATE system_config SET auth_enabled = ?, updated_at = datetime("now") WHERE id = ?'
+  ).bind(enabled ? 1 : 0, 'default').run();
   
   return c.json({ success: true });
 });
 
 authRouter.post('/auth-enabled', requireAuth, requireAdmin, async (c) => {
   const { enabled } = await c.req.json();
-  const value = enabled ? 'true' : 'false';
   
   await c.env.DB.prepare(
-    "INSERT INTO system_config (key, value) VALUES ('auth_enabled', ?) ON CONFLICT(key) DO UPDATE SET value = ?"
-  ).bind(value, value).run();
+    'UPDATE system_config SET auth_enabled = ?, updated_at = datetime("now") WHERE id = ?'
+  ).bind(enabled ? 1 : 0, 'default').run();
   
   return c.json({ success: true });
 });
 
 authRouter.put('/profile', requireAuth, async (c) => {
   const user = c.get('user') as AuthUser;
-  const { name } = await c.req.json();
+  const { username } = await c.req.json();
   
-  await c.env.DB.prepare('UPDATE users SET name = ? WHERE id = ?').bind(name, user.id).run();
+  await c.env.DB.prepare('UPDATE users SET username = ?, updated_at = datetime("now") WHERE id = ?')
+    .bind(username, user.id).run();
   
   return c.json({ success: true });
 });
@@ -204,7 +209,7 @@ authRouter.put('/email', requireAuth, async (c) => {
     return c.json({ error: 'Email already in use' }, 400);
   }
   
-  await c.env.DB.prepare('UPDATE users SET email = ? WHERE id = ?').bind(email, user.id).run();
+  await c.env.DB.prepare('UPDATE users SET email = ?, updated_at = datetime("now") WHERE id = ?').bind(email, user.id).run();
   
   return c.json({ success: true });
 });
@@ -219,10 +224,10 @@ authRouter.post('/change-password', requireAuth, async (c) => {
   }
   
   const newHash = await hashPassword(newPassword);
-  await c.env.DB.prepare('UPDATE users SET password_hash = ?, must_reset_password = 0 WHERE id = ?')
+  await c.env.DB.prepare('UPDATE users SET password_hash = ?, must_reset_password = 0, updated_at = datetime("now") WHERE id = ?')
     .bind(newHash, user.id).run();
     
   return c.json({ success: true });
 });
 
-export default authRouter;
+export { authRouter as authRoutes };
