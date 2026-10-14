@@ -527,7 +527,8 @@ export const Editor: React.FC = () => {
     };
     renderLoop();
 
-    socket.on('presence-update', (users: Peer[]) => {
+    socket.on('presence-update', (data: any) => {
+      const users: Peer[] = data.users ?? [];
       lastPresenceUsersRef.current = users;
       const selfId = socketMeRef.current.id;
       setPeers(users.filter(u => u.id !== selfId));
