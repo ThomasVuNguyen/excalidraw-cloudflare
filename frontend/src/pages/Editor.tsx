@@ -1688,10 +1688,9 @@ export const Editor: React.FC = () => {
           toast.warning("Blank scene detected on load. Skipping save to protect existing data.");
           shouldNavigate = true;
         } else {
-          await Promise.all([
-            enqueueSceneSave(id, safeElements, appState, files, { suppressErrors: false }),
-            savePreviewRef.current(id, safeElements, appState, files)
-          ]);
+          // Save scene first, then preview (serialized to avoid version race condition).
+          await enqueueSceneSave(id, safeElements, appState, files, { suppressErrors: false });
+          await savePreviewRef.current(id, safeElements, appState, files);
           console.log("[Editor] Saved on back navigation", { drawingId: id });
           shouldNavigate = true;
         }

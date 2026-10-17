@@ -287,20 +287,26 @@ app.put('/:id', async (c) => {
     return c.json({ error: 'Forbidden' }, 403);
   }
 
-  if (body.version !== undefined && current.version !== body.version) {
+  // Determine if this is a content update (elements/appState/files) or metadata-only (preview/name).
+  const isContentUpdate = body.elements !== undefined || body.appState !== undefined || body.files !== undefined;
+
+  if (isContentUpdate && body.version !== undefined && current.version !== body.version) {
     return c.json({ error: 'VERSION_CONFLICT', currentVersion: current.version }, 409);
   }
 
-  const nextVersion = (current.version as number) + 1;
+  // Only bump version for content updates, not metadata-only changes (preview, name).
+  const nextVersion = isContentUpdate ? (current.version as number) + 1 : (current.version as number);
 
-  // Create snapshot
-  await c.env.DB.prepare(`
-    INSERT INTO drawing_snapshots (id, drawing_id, version, elements, app_state, files, created_at)
-    VALUES (?, ?, ?, ?, ?, ?, ?)
-  `).bind(
-    crypto.randomUUID(), id, current.version,
-    current.elements as string, current.app_state as string, current.files as string, current.updated_at as string
-  ).run();
+  // Only create snapshots for content updates, not metadata-only changes.
+  if (isContentUpdate) {
+    await c.env.DB.prepare(`
+      INSERT INTO drawing_snapshots (id, drawing_id, version, elements, app_state, files, created_at)
+      VALUES (?, ?, ?, ?, ?, ?, ?)
+    `).bind(
+      crypto.randomUUID(), id, current.version,
+      current.elements as string, current.app_state as string, current.files as string, current.updated_at as string
+    ).run();
+  }
 
   let filesVal = body.files !== undefined ? JSON.stringify(body.files) : null;
   if (filesVal && filesVal.length > 800000) {

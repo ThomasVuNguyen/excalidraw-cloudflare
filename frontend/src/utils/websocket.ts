@@ -50,27 +50,34 @@ export class ExcalidashSocket {
       };
 
       this.ws.onmessage = (event) => {
+        let data: any;
         try {
-          const data = JSON.parse(event.data);
-          const type = data?.type;
-          if (!type) return;
-
-          // Handle join-ack specially (it's the callback for join-room)
-          if (type === "join-ack" && this.pendingJoinCallback) {
-            this.pendingJoinCallback({ user: data.user });
-            this.pendingJoinCallback = null;
-            return;
-          }
-
-          // Dispatch to registered handlers
-          const handlers = this.handlers.get(type);
-          if (handlers) {
-            for (const handler of handlers) {
-              handler(data);
-            }
-          }
+          data = JSON.parse(event.data);
         } catch (err) {
           console.error("[ExcalidashSocket] Failed to parse message:", err);
+          return;
+        }
+
+        const type = data?.type;
+        if (!type) return;
+
+        // Handle join-ack specially (it's the callback for join-room)
+        if (type === "join-ack" && this.pendingJoinCallback) {
+          this.pendingJoinCallback({ user: data.user });
+          this.pendingJoinCallback = null;
+          return;
+        }
+
+        // Dispatch to registered handlers
+        const handlers = this.handlers.get(type);
+        if (handlers) {
+          for (const handler of handlers) {
+            try {
+              handler(data);
+            } catch (err) {
+              console.error(`[ExcalidashSocket] Error in handler for "${type}":`, err);
+            }
+          }
         }
       };
     } catch (err) {
