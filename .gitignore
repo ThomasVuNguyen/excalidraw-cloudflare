@@ -39,6 +39,9 @@ backend/src/generated/
 .env.production
 .env.staging
 
+# GlitchTip / Sentry CLI config (contains auth token)
+.sentryclirc
+
 # Build outputs
 frontend/dist/
 frontend/build/

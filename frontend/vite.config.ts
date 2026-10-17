@@ -35,6 +35,11 @@ export default defineConfig(({ command }) => {
       'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
       'import.meta.env.VITE_APP_BUILD_LABEL': JSON.stringify(buildLabel),
     },
+    build: {
+      // Generate source maps for GlitchTip but don't reference them in output
+      // (they get uploaded separately and deleted after deploy)
+      sourcemap: "hidden",
+    },
     optimizeDeps: {
       esbuildOptions: {
         define: processEnvDefines,

@@ -13,7 +13,9 @@
     "test:coverage": "vitest run --coverage",
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
-    "deploy": "npm run build && wrangler deploy"
+    "deploy": "npm run build && npm run sourcemaps:upload && npm run sourcemaps:clean && wrangler deploy",
+    "sourcemaps:upload": "glitchtip-cli sourcemaps inject ./dist && glitchtip-cli sourcemaps upload ./dist --release excalidash-frontend@$(node -p \"require('./package.json').version\") --org beenex --project drawbeenexcompany --url-prefix '~/'",
+    "sourcemaps:clean": "find ./dist -name '*.map' -type f -delete"
   },
   "dependencies": {
     "@dnd-kit/core": "^6.3.1",
