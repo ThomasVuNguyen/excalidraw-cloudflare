@@ -19,6 +19,8 @@ export class ExcalidashSocket {
   private reconnectTimer: ReturnType<typeof setTimeout> | null = null;
   private url: string;
   private pendingJoinCallback: JoinCallback | null = null;
+  /** Messages queued while the WebSocket is still connecting. */
+  private pendingMessages: Array<{ type: string; data: any; callback?: JoinCallback }> = [];
 
   constructor(url: string) {
     this.url = url;
@@ -36,6 +38,11 @@ export class ExcalidashSocket {
       this.ws.onopen = () => {
         this._connected = true;
         this.reconnectAttempts = 0;
+        // Flush any messages that were queued before the connection opened
+        const queued = this.pendingMessages.splice(0);
+        for (const msg of queued) {
+          this.emit(msg.type, msg.data, msg.callback);
+        }
         this.emit_internal("connect", undefined);
       };
 
@@ -131,6 +138,11 @@ export class ExcalidashSocket {
    */
   emit(type: string, data: any, callback?: JoinCallback): void {
     if (!this.ws || this.ws.readyState !== WebSocket.OPEN) {
+      // If the socket is still connecting, queue the message for delivery on open
+      if (this.ws && this.ws.readyState === WebSocket.CONNECTING) {
+        this.pendingMessages.push({ type, data, callback });
+        return;
+      }
       console.warn("[ExcalidashSocket] Cannot emit — not connected");
       return;
     }
@@ -165,6 +177,7 @@ export class ExcalidashSocket {
       this.reconnectTimer = null;
     }
     this.reconnectAttempts = this.maxReconnectAttempts; // prevent reconnect
+    this.pendingMessages.length = 0; // discard queued messages
     if (this.ws) {
       this.ws.close(1000, "Client disconnect");
       this.ws = null;
