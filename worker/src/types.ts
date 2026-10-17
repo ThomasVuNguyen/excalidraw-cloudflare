@@ -40,10 +40,13 @@ export interface Env {
   ASSETS?: Fetcher;
 }
 
+import type { Toucan } from "toucan-js";
+
 // Hono app-level variables (set by middleware)
 export type AppVariables = {
   user: AuthUser | null;
   requestId: string;
+  sentry: Toucan;
 };
 
 export interface AuthUser {

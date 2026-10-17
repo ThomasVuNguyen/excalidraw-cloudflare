@@ -1,6 +1,7 @@
 import React, { createContext, useContext, useState, useEffect, useCallback } from 'react';
 import type { ReactNode } from 'react';
 import { useNavigate } from 'react-router-dom';
+import { setUser as setSentryUser } from '../utils/sentry';
 import {
   authStatus,
   authMe,
@@ -151,6 +152,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       try {
         const response = await authMe();
         setUser(response.user);
+        setSentryUser({ id: response.user.id, email: response.user.email, username: response.user.username ?? undefined });
         localStorage.setItem(USER_KEY, JSON.stringify(response.user));
       } catch {
         if (isShareFlow) {
@@ -162,6 +164,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
           await authRefresh();
           const userResponse = await authMe();
           setUser(userResponse.user);
+          setSentryUser({ id: userResponse.user.id, email: userResponse.user.email, username: userResponse.user.username ?? undefined });
           localStorage.setItem(USER_KEY, JSON.stringify(userResponse.user));
         } catch {
           localStorage.removeItem(USER_KEY);
@@ -198,6 +201,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setAuthStatusError(null);
       setAuthEnabled(true);
       setUser(userData);
+      setSentryUser({ id: userData.id, email: userData.email, username: userData.username ?? undefined });
     } catch (error: unknown) {
       if (isAxiosError(error)) {
         const message =
@@ -227,6 +231,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
       setAuthStatusError(null);
       setAuthEnabled(true);
       setUser(userData);
+      setSentryUser({ id: userData.id, email: userData.email, username: userData.username ?? undefined });
     } catch (error: unknown) {
       if (isAxiosError(error)) {
         const message =
@@ -246,6 +251,7 @@ export const AuthProvider: React.FC<{ children: ReactNode }> = ({ children }) =>
     void authLogout().catch(() => undefined);
     localStorage.removeItem(USER_KEY);
     setUser(null);
+    setSentryUser(null);
     setTimeout(() => {
       navigate('/login');
     }, 0);
