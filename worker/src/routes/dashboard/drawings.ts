@@ -269,6 +269,7 @@ app.post('/', async (c) => {
 // PUT /:id
 app.put('/:id', async (c) => {
   const user = c.get('user');
+  if (!user) return c.json({ error: 'Unauthorized' }, 401);
   const id = c.req.param('id');
   const body = await c.req.json();
   const now = new Date().toISOString();
@@ -277,8 +278,8 @@ app.put('/:id', async (c) => {
   if (!current) return c.json({ error: 'Not found' }, 404);
 
   let hasEdit = false;
-  if (user && current.user_id === user.id) hasEdit = true;
-  else if (user) {
+  if (current.user_id === user.id) hasEdit = true;
+  else {
     const perm = await c.env.DB.prepare('SELECT permission FROM drawing_permissions WHERE drawing_id = ? AND user_id = ?').bind(id, user.id).first();
     if (perm && (perm.permission === 'edit' || perm.permission === 'owner')) hasEdit = true;
   }
