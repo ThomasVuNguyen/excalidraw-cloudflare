@@ -46,6 +46,14 @@ check_glitchtip_cli() {
   return 0
 }
 
+GT="glitchtip-cli --url https://glitchtip.beenex.cloud --org beenex --project drawbeenexcompany"
+
+# Create + finalize the GlitchTip release (best-effort; ignore "already exists")
+ensure_release() {
+  $GT releases new "$RELEASE" >/dev/null 2>&1 || true
+  $GT releases finalize "$RELEASE" >/dev/null 2>&1 || true
+}
+
 # ── Frontend ──────────────────────────────────────────────────────────────────
 deploy_frontend() {
   info "Building frontend..."
@@ -54,6 +62,7 @@ deploy_frontend() {
 
   # Upload source maps to GlitchTip (best-effort)
   if check_glitchtip_cli; then
+    ensure_release
     info "Injecting debug IDs into source maps..."
     glitchtip-cli sourcemaps inject ./dist || warn "debug ID injection failed (continuing)"
 
@@ -83,6 +92,7 @@ deploy_worker() {
 
   # Upload worker bundle source maps to GlitchTip (best-effort)
   if check_glitchtip_cli; then
+    ensure_release
     glitchtip-cli sourcemaps upload "$outdir" \
       --url https://glitchtip.beenex.cloud \
       --release "$RELEASE" \
