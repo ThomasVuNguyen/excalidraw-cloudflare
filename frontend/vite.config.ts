@@ -52,6 +52,26 @@ export default defineConfig(({ command }) => {
       // Generate source maps for GlitchTip but don't reference them in output
       // (they get uploaded separately and deleted after deploy)
       sourcemap: "hidden",
+      rollupOptions: {
+        output: {
+          // Excalidraw's font-subsetting Web Worker (subset-worker.chunk.js) imports a few tiny
+          // shared helper chunks. Left alone, Rollup merges them into our app entry, so the
+          // worker ends up importing index-*.js, which touches `document` and throws
+          // "document is not defined" inside the worker. Give each of the worker's
+          // helpers that the worker shares with the app their own chunk so the worker never
+          // loads the app entry. (Worker-only deps are left alone so they stay lazy.)
+          manualChunks(id, { getModuleInfo }) {
+            if (!id.includes("/@excalidraw/excalidraw/dist/prod/chunk-")) return undefined;
+            const subsetChunk = /\/@excalidraw\/excalidraw\/dist\/prod\/subset-(worker|shared)\.chunk\.js$/;
+            const importers = getModuleInfo(id)?.importers ?? [];
+            const sharedWithApp =
+              importers.some((importer) => subsetChunk.test(importer) || importer.includes("/dist/prod/chunk-")) &&
+              importers.some((importer) => !subsetChunk.test(importer));
+            if (!sharedWithApp) return undefined;
+            return `excalidraw-${path.basename(id, ".js")}`;
+          },
+        },
+      },
     },
     optimizeDeps: {
       esbuildOptions: {
