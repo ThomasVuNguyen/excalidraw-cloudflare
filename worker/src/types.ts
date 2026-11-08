@@ -36,17 +36,19 @@ export interface Env {
   OIDC_EMAIL_CLAIM?: string;
   OIDC_REQUIRE_EMAIL_VERIFIED?: string;
   OIDC_JIT_PROVISIONING?: string;
+  // GlitchTip / Sentry (empty DSN disables reporting)
+  SENTRY_DSN?: string;
+  SENTRY_ENVIRONMENT?: string;
+  SENTRY_RELEASE?: string;  // git SHA, injected at deploy time
+
   // Static Assets (optional binding)
   ASSETS?: Fetcher;
 }
-
-import type { Toucan } from "toucan-js";
 
 // Hono app-level variables (set by middleware)
 export type AppVariables = {
   user: AuthUser | null;
   requestId: string;
-  sentry: Toucan;
 };
 
 export interface AuthUser {

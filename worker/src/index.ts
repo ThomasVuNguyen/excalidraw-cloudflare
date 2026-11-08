@@ -19,10 +19,14 @@ import { migrationRouter } from "./routes/system/migration";
 import { csrfMiddleware, csrfTokenRoute } from "./middleware/csrf";
 import { authMiddleware } from "./middleware/auth";
 import { onboardingGate } from "./middleware/onboarding";
-import { createSentry } from "./utils/sentry";
+import { Sentry, sentryOptions, logDeployOnce } from "./utils/sentry";
+import { DrawingRoom as DrawingRoomBase } from "./durable-objects/DrawingRoom";
 
-// Re-export Durable Objects so wrangler can find them
-export { DrawingRoom } from "./durable-objects/DrawingRoom";
+// Export the (Sentry-instrumented) Durable Object so wrangler can find it
+export const DrawingRoom = Sentry.instrumentDurableObjectWithSentry(
+  (env: Env) => sentryOptions(env),
+  DrawingRoomBase,
+);
 
 // Create the Hono app with typed env and variables
 const app = new Hono<{ Bindings: Env; Variables: AppVariables }>();
@@ -36,16 +40,23 @@ app.use("*", async (c, next) => {
   await next();
 });
 
-// GlitchTip / Sentry — create a per-request instance
+// GlitchTip / Sentry — tag request + one structured log per request outcome
 app.use("*", async (c, next) => {
-  const sentry = createSentry(c);
-  c.set("sentry", sentry);
-  sentry.addBreadcrumb({
-    message: `${c.req.method} ${c.req.path}`,
-    category: "http",
-    data: { url: c.req.url, method: c.req.method },
-  });
-  await next();
+  logDeployOnce(c.env);
+  const requestId = c.get("requestId");
+  Sentry.setTag("request_id", requestId);
+  const started = Date.now();
+  try {
+    await next();
+  } finally {
+    Sentry.logger.info("request", {
+      method: c.req.method,
+      path: c.req.path,
+      status: c.res?.status,
+      duration_ms: Date.now() - started,
+      request_id: requestId,
+    });
+  }
 });
 
 // Security headers
@@ -158,12 +169,7 @@ app.onError((err, c) => {
   console.error(`[${c.get("requestId")}] Error:`, err.message, err.stack);
 
   // Report to GlitchTip
-  try {
-    const sentry = c.get("sentry");
-    sentry.captureException(err);
-  } catch {
-    // Sentry not available — already logged above
-  }
+  Sentry.captureException(err, { tags: { request_id: c.get("requestId") } });
 
   const status = "status" in err ? (err as any).status : 500;
   return c.json(
@@ -172,4 +178,6 @@ app.onError((err, c) => {
   );
 });
 
-export default app;
+export default Sentry.withSentry((env: Env) => sentryOptions(env), {
+  fetch: app.fetch,
+} satisfies ExportedHandler<Env>);

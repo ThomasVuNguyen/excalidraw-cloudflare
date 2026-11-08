@@ -6,19 +6,26 @@
  */
 import * as Sentry from "@sentry/browser";
 
-const DSN =
-  "https://d304d0eb2e3c4705b85c0e64dbade2b5@glitchtip.beenex.cloud/3";
+// Production builds report to GlitchTip by default; dev builds only if
+// VITE_SENTRY_DSN is set explicitly. An empty DSN disables Sentry entirely.
+const DSN: string =
+  import.meta.env.VITE_SENTRY_DSN ??
+  (import.meta.env.PROD
+    ? "https://d304d0eb2e3c4705b85c0e64dbade2b5@glitchtip.beenex.cloud/3"
+    : "");
 
 let initialized = false;
 
 export function initSentry(): void {
   if (initialized) return;
+  if (!DSN) return;
 
   Sentry.init({
     dsn: DSN,
     // GlitchTip is Sentry-compatible; no tunnel needed, just point at the DSN
     environment: import.meta.env.MODE, // "development" | "production"
-    release: `excalidash-frontend@${import.meta.env.VITE_APP_VERSION ?? "0.0.0"}`,
+    // Git commit SHA, injected at build time (see vite.config.ts)
+    release: import.meta.env.VITE_SENTRY_RELEASE || undefined,
 
     // Send 100 % of errors (tune down once traffic grows)
     sampleRate: 1.0,
@@ -26,8 +33,12 @@ export function initSentry(): void {
     // Capture 20 % of transactions for performance
     tracesSampleRate: 0.2,
 
+    // Logs are always on in @sentry/* v11 (the old `enableLogs` option was removed).
     integrations: [
       Sentry.breadcrumbsIntegration(),
+      Sentry.consoleLoggingIntegration({ levels: ["log", "info", "warn", "error"] }),
+      // console.error still creates Issues
+      Sentry.captureConsoleIntegration({ levels: ["error"] }),
     ],
 
     beforeSend(event) {
@@ -38,6 +49,10 @@ export function initSentry(): void {
   });
 
   initialized = true;
+  Sentry.logger.info("deploy", {
+    release: import.meta.env.VITE_SENTRY_RELEASE || "unknown",
+    component: "frontend",
+  });
 }
 
 /**

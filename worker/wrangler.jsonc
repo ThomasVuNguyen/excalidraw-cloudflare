@@ -52,7 +52,11 @@
 
   "vars": {
     "AUTH_MODE": "local",
-    "FRONTEND_URL": "https://draw.beenex.company"
+    "FRONTEND_URL": "https://draw.beenex.company",
+    // GlitchTip (public DSN). Override with SENTRY_DSN="" in .dev.vars to disable locally.
+    // SENTRY_RELEASE (git SHA) is injected by deploy.sh via `wrangler deploy --var`.
+    "SENTRY_DSN": "https://d304d0eb2e3c4705b85c0e64dbade2b5@glitchtip.beenex.cloud/3",
+    "SENTRY_ENVIRONMENT": "production"
   },
 
   "routes": [

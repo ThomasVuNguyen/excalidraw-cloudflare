@@ -1,64 +1,44 @@
 /**
  * GlitchTip / Sentry integration for the ExcaliDash Cloudflare Worker.
  *
- * Uses toucan-js — a lightweight Sentry client designed for Cloudflare Workers
- * (no Node.js APIs required).
+ * Uses @sentry/cloudflare. The worker fetch handler is wrapped with
+ * `Sentry.withSentry` and the Durable Object with
+ * `Sentry.instrumentDurableObjectWithSentry` (see index.ts), which flush
+ * events and logs via ctx.waitUntil so nothing is dropped.
+ *
+ * Sentry stays disabled when SENTRY_DSN is empty (e.g. local dev with
+ * SENTRY_DSN="" in .dev.vars).
  */
-import { Toucan } from "toucan-js";
-import type { Context } from "hono";
-import type { Env, AppVariables } from "../types";
+import * as Sentry from "@sentry/cloudflare";
+import type { Env } from "../types";
 
-const DSN =
-  "https://d304d0eb2e3c4705b85c0e64dbade2b5@glitchtip.beenex.cloud/3";
-
-/**
- * Create a Toucan (Sentry) instance scoped to a single request.
- * Attach it once per request via middleware, then use throughout handlers.
- */
-export function createSentry(
-  c: Context<{ Bindings: Env; Variables: AppVariables }>,
-): Toucan {
-  const sentry = new Toucan({
-    dsn: DSN,
-    context: c.executionCtx,
-    request: c.req.raw,
-    environment: "production",
-    release: "excalidash-worker@0.5.0",
+export function sentryOptions(env: Env): Sentry.CloudflareOptions {
+  const dsn = env.SENTRY_DSN || "";
+  return {
+    dsn,
+    enabled: Boolean(dsn),
+    environment: env.SENTRY_ENVIRONMENT || "production",
+    release: env.SENTRY_RELEASE || undefined,
     sampleRate: 1.0,
-    requestDataOptions: {
-      // Don't send cookies / auth headers to GlitchTip
-      allowedHeaders: [
-        "content-type",
-        "user-agent",
-        "x-request-id",
-        "accept",
-      ],
-      allowedSearchParams: /(.*)/,
-    },
-  });
-
-  // Tag with request ID if available
-  const requestId = c.get("requestId");
-  if (requestId) {
-    sentry.setTag("request_id", requestId);
-  }
-
-  return sentry;
+    tracesSampleRate: 0.1,
+    // Logs are always on in @sentry/* v11 (the old `enableLogs` option was removed).
+    integrations: [
+      Sentry.consoleLoggingIntegration({ levels: ["log", "info", "warn", "error"] }),
+      Sentry.captureConsoleIntegration({ levels: ["error"] }),
+    ],
+  };
 }
 
-/**
- * Create a Toucan instance for use inside Durable Objects.
- * DOs don't have the Hono context, so we accept raw params.
- */
-export function createSentryForDO(
-  ctx: { waitUntil: (promise: Promise<unknown>) => void },
-  requestInfo?: { url?: string; method?: string },
-): Toucan {
-  return new Toucan({
-    dsn: DSN,
-    context: ctx,
-    environment: "production",
-    release: "excalidash-worker@0.5.0",
-    sampleRate: 1.0,
+let deployLogged = false;
+
+/** Emit a one-time "deploy" log per isolate (first request). */
+export function logDeployOnce(env: Env): void {
+  if (deployLogged) return;
+  deployLogged = true;
+  Sentry.logger.info("deploy", {
+    release: env.SENTRY_RELEASE || "unknown",
+    component: "worker",
   });
 }
+
+export { Sentry };

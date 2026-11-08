@@ -12,7 +12,7 @@
  */
 import { DurableObject } from "cloudflare:workers";
 import type { Env, WSClientMessage, WSServerMessage } from "../types";
-import { createSentryForDO } from "../utils/sentry";
+import { Sentry } from "../utils/sentry";
 
 interface RoomUser {
   id: string;
@@ -97,10 +97,7 @@ export class DrawingRoom extends DurableObject<Env> {
       }
     } catch (err) {
       console.error("Error processing WebSocket message:", err);
-      try {
-        const sentry = createSentryForDO(this.ctx);
-        sentry.captureException(err);
-      } catch { /* best-effort */ }
+      Sentry.captureException(err);
       const errorMsg: WSServerMessage = {
         type: "error",
         message: "Failed to process message",
@@ -126,10 +123,7 @@ export class DrawingRoom extends DurableObject<Env> {
    */
   async webSocketError(ws: WebSocket, error: unknown): Promise<void> {
     console.error("WebSocket error:", error);
-    try {
-      const sentry = createSentryForDO(this.ctx);
-      sentry.captureException(error);
-    } catch { /* best-effort */ }
+    Sentry.captureException(error);
     const attachment = ws.deserializeAttachment() as SocketAttachment | null;
     if (attachment?.userId) {
       this.broadcastPresence(ws);

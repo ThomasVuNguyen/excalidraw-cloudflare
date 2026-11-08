@@ -14,7 +14,7 @@
     "test:e2e": "playwright test",
     "test:e2e:ui": "playwright test --ui",
     "deploy": "npm run build && npm run sourcemaps:upload && npm run sourcemaps:clean && wrangler deploy",
-    "sourcemaps:upload": "glitchtip-cli sourcemaps inject ./dist && glitchtip-cli sourcemaps upload ./dist --release excalidash-frontend@$(node -p \"require('./package.json').version\") --org beenex --project drawbeenexcompany --url-prefix '~/'",
+    "sourcemaps:upload": "(glitchtip-cli sourcemaps inject ./dist && glitchtip-cli sourcemaps upload ./dist --url https://glitchtip.beenex.cloud --release ${SENTRY_RELEASE:-$(git rev-parse HEAD)} --org beenex --project drawbeenexcompany --url-prefix '~/') || true",
     "sourcemaps:clean": "find ./dist -name '*.map' -type f -delete"
   },
   "dependencies": {

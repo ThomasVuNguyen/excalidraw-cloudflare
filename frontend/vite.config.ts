@@ -2,6 +2,7 @@ import { defineConfig } from "vite";
 import react from "@vitejs/plugin-react";
 import fs from "fs";
 import path from "path";
+import { execSync } from "child_process";
 
 import { cloudflare } from "@cloudflare/vite-plugin";
 
@@ -18,6 +19,17 @@ try {
 }
 
 const appVersion = process.env.VITE_APP_VERSION?.trim() || versionFromFile;
+// GlitchTip release = git commit SHA (deploy.sh passes SENTRY_RELEASE explicitly)
+let sentryRelease = process.env.SENTRY_RELEASE?.trim() || "";
+if (!sentryRelease) {
+  try {
+    sentryRelease = execSync("git rev-parse HEAD", { stdio: ["ignore", "pipe", "ignore"] })
+      .toString()
+      .trim();
+  } catch {
+    sentryRelease = "";
+  }
+}
 const buildLabel = process.env.VITE_APP_BUILD_LABEL?.trim() || "local development build";
 
 export default defineConfig(({ command }) => {
@@ -34,6 +46,7 @@ export default defineConfig(({ command }) => {
       ...processEnvDefines,
       'import.meta.env.VITE_APP_VERSION': JSON.stringify(appVersion),
       'import.meta.env.VITE_APP_BUILD_LABEL': JSON.stringify(buildLabel),
+      'import.meta.env.VITE_SENTRY_RELEASE': JSON.stringify(sentryRelease),
     },
     build: {
       // Generate source maps for GlitchTip but don't reference them in output

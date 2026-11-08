@@ -4,13 +4,14 @@
   "private": true,
   "type": "module",
   "scripts": {
-    "dev": "wrangler dev",
-    "deploy": "wrangler deploy",
+    "dev": "wrangler dev --var SENTRY_DSN: --var SENTRY_ENVIRONMENT:development",
+    "deploy": "wrangler deploy --var SENTRY_RELEASE:$(git rev-parse HEAD)",
     "db:migrate": "wrangler d1 migrations apply excalidash-db --local",
     "db:migrate:remote": "wrangler d1 migrations apply excalidash-db --remote",
     "typecheck": "tsc --noEmit"
   },
   "dependencies": {
+    "@sentry/cloudflare": "^11.11.0",
     "bcryptjs": "^2.4.3",
     "dompurify": "^3.3.0",
     "drizzle-orm": "^0.39.0",
@@ -18,7 +19,6 @@
     "hono": "^4.7.0",
     "jose": "^6.0.0",
     "linkedom": "^0.18.0",
-    "toucan-js": "^4.1.1",
     "uuid": "^11.0.0",
     "zod": "^3.24.0"
   },
